@@ -28,11 +28,11 @@ pub struct RangeGateConfig {
     pub var_cols: [Column<Advice>; ADV_COLUMNS],
 
     // The sum_limit is used for small range check,
-    // with gates `sum_limit[row] = var_cols[0][row] + var_cols[1][row] + 1`.
-    // Suppose we want a cell in which the value < R, and R < 2 ** BITS.
+    // with gates `sum_limit[row] = var_cols[0][row] + var_cols[1][row]`.
+    // Suppose we want a cell in which the value <= R, and R < 2 ** BITS.
     // We alloc a row and assign sum_limit[row] = R.
     // Because var_cols[0][row] < 2^BITS, var_cols[1][row] < 2^BITS,
-    // the two cells must be less than R.
+    // the two cells must be less than or equal to R.
     pub sum_limit: Column<Fixed>,
     pub sum_limit_sel: Column<Fixed>,
 
@@ -84,7 +84,7 @@ impl<N: FieldExt> RangeGate<N> {
             for i in 0..COMPACT_CELLS {
                 compact_value = compact_value
                     - meta.query_advice(var_cols[i], Rotation::cur())
-                        * Expression::Constant(N::from(1u64 << (i * BITS)));
+                        * Expression::Constant((BigUint::from(1u64) << (i * BITS)).to_field());
             }
 
             vec![sel * compact_value]
@@ -94,8 +94,7 @@ impl<N: FieldExt> RangeGate<N> {
             let sel = meta.query_fixed(sum_limit_sel, Rotation::cur());
             let sum = meta.query_advice(var_cols[0], Rotation::cur())
                 + meta.query_advice(var_cols[1], Rotation::cur())
-                - meta.query_fixed(sum_limit, Rotation::cur())
-                - Expression::Constant(N::one());
+                - meta.query_fixed(sum_limit, Rotation::cur());
             vec![sel * sum]
         });
 
@@ -123,6 +122,78 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
         Ok(())
     }
 
+    pub fn assign_common_range_cell(
+        &mut self,
+        value: Option<N>,
+    ) -> Result<AssignedValue<N>, Error> {
+        let (row, col) = if let Some((free_row, col)) = self.free_common_cells.pop() {
+            if col + 1 < ADV_COLUMNS {
+                self.free_common_cells.push((free_row, col + 1));
+            }
+            (free_row, col)
+        } else {
+            let row = self.offset;
+            self.free_common_cells.push((row, 1));
+            self.offset += 1;
+            (row, 0)
+        };
+
+        let assigned = self.region.assign_advice(
+            || "assign_common_range_cell",
+            self.range_gate_config.var_cols[col],
+            row,
+            || Ok(value.unwrap()),
+        )?;
+        Ok(AssignedValue {
+            value,
+            cell: assigned.cell(),
+        })
+    }
+
+    // value <= range
+    pub fn assign_range_cell(
+        &mut self,
+        value: Option<N>,
+        range: N,
+    ) -> Result<AssignedValue<N>, Error> {
+        self.region.assign_fixed(
+            || "assign_range_cell",
+            self.range_gate_config.sum_limit_sel,
+            self.offset,
+            || Ok(N::one()),
+        )?;
+        self.region.assign_fixed(
+            || "assign_range_cell",
+            self.range_gate_config.sum_limit,
+            self.offset,
+            || Ok(range),
+        )?;
+
+        self.region.assign_advice(
+            || "assign_range_cell",
+            self.range_gate_config.var_cols[1],
+            self.offset,
+            || Ok(range - value.unwrap()),
+        )?;
+        let assigned = self.region.assign_advice(
+            || "assign_range_cell",
+            self.range_gate_config.var_cols[0],
+            self.offset,
+            || Ok(value.unwrap()),
+        )?;
+
+        if 2 < ADV_COLUMNS {
+            self.free_common_cells.push((self.offset, 2));
+        }
+
+        self.offset += 1;
+
+        Ok(AssignedValue {
+            value,
+            cell: assigned.cell(),
+        })
+    }
+
     pub fn assign_compact_cell(&mut self, value: Option<N>) -> Result<AssignedValue<N>, Error> {
         self.region.assign_fixed(
             || "assign_compact_cell",
@@ -136,7 +207,6 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
             self.offset,
             || Ok(value.unwrap()),
         )?;
-        let cell = assigned.cell();
 
         // Skip on non-advices-assignment stage
         if assigned.value().is_some() {
@@ -146,7 +216,10 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
 
         self.offset += 1;
 
-        Ok(AssignedValue { value, cell })
+        Ok(AssignedValue {
+            value,
+            cell: assigned.cell(),
+        })
     }
 
     pub fn finalize_compact_cells(&mut self) -> Result<(), Error> {
@@ -185,7 +258,11 @@ mod test {
     use halo2_proofs::plonk::*;
 
     #[derive(Clone, Debug)]
-    struct RangeTestCircuit {}
+    struct RangeTestCircuit {
+        common_start: u64,
+        range_value: u64,
+        range_limit: u64,
+    }
 
     impl Circuit<Fr> for RangeTestCircuit {
         type Config = RangeGateConfig;
@@ -222,6 +299,16 @@ mod test {
                     context.finalize_compact_cells()?;
                     end_timer!(timer);
 
+                    context.assign_range_cell(
+                        Some(Fr::from(self.range_value)),
+                        Fr::from(self.range_limit),
+                    )?;
+                    for i in 0..30 {
+                        context.assign_common_range_cell(Some(Fr::from(
+                            self.common_start + i as u64,
+                        )))?;
+                    }
+
                     Ok(())
                 },
             )?;
@@ -231,8 +318,62 @@ mod test {
     }
 
     #[test]
-    fn test_range_gate() {
-        run_circuit_on_bn256(RangeTestCircuit {}, 20);
-        bench_circuit_on_bn256(RangeTestCircuit {}, 20);
+    fn bench_range_gate() {
+        bench_circuit_on_bn256(
+            RangeTestCircuit {
+                common_start: 0,
+                range_value: 10,
+                range_limit: 16,
+            },
+            20,
+        );
+    }
+
+    #[test]
+    fn test_range_gate_success() {
+        run_circuit_on_bn256(
+            RangeTestCircuit {
+                common_start: 0,
+                range_value: 10,
+                range_limit: 16,
+            },
+            20,
+        );
+    }
+
+    #[test]
+    fn test_range_gate_fail() {
+        run_circuit_on_bn256_expect_fail(
+            RangeTestCircuit {
+                common_start: 1 << BITS,
+                range_value: 10,
+                range_limit: 16,
+            },
+            20,
+        );
+        run_circuit_on_bn256_expect_fail(
+            RangeTestCircuit {
+                common_start: (1 << BITS) + 1,
+                range_value: 10,
+                range_limit: 16,
+            },
+            20,
+        );
+        run_circuit_on_bn256_expect_fail(
+            RangeTestCircuit {
+                common_start: 0,
+                range_value: 17,
+                range_limit: 16,
+            },
+            20,
+        );
+        run_circuit_on_bn256_expect_fail(
+            RangeTestCircuit {
+                common_start: 0,
+                range_value: 1 << BITS,
+                range_limit: 1 << BITS,
+            },
+            20,
+        );
     }
 }
