@@ -1,14 +1,20 @@
+use ark_std::Zero;
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::plonk::Advice;
 use halo2_proofs::plonk::Column;
 use halo2_proofs::plonk::ConstraintSystem;
+use halo2_proofs::plonk::Error;
 use halo2_proofs::plonk::Expression;
 use halo2_proofs::plonk::Fixed;
 use halo2_proofs::poly::Rotation;
+use num_bigint::BigUint;
 use std::marker::PhantomData;
 use std::vec;
 
+use crate::assign::AssignedValue;
+use crate::context::RangeRegionContext;
 use crate::range_info::*;
+use crate::util::*;
 
 const BITS: usize = COMMON_RANGE_BITS as usize; // value is 18
 const ADV_COLUMNS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
@@ -31,8 +37,8 @@ pub struct RangeGateConfig {
     pub sum_limit_sel: Column<Fixed>,
 
     // Used to compact COMPACT_CELLS(6) cells into COMPACT_BITS(108) in BE.
-    pub acc: Column<Advice>,
-    pub acc_sel: Column<Fixed>,
+    pub compact: Column<Advice>,
+    pub compact_sel: Column<Fixed>,
 
     // u18 table
     pub ubits_table: Column<Fixed>,
@@ -55,8 +61,8 @@ impl<N: FieldExt> RangeGate<N> {
         let var_cols = [0; ADV_COLUMNS].map(|_| meta.advice_column());
         let sum_limit = meta.fixed_column();
         let sum_limit_sel = meta.fixed_column();
-        let acc = meta.advice_column();
-        let acc_sel = meta.fixed_column();
+        let compact = meta.advice_column();
+        let compact_sel = meta.fixed_column();
         let ubits_table = meta.fixed_column();
 
         for i in 0..ADV_COLUMNS {
@@ -69,19 +75,19 @@ impl<N: FieldExt> RangeGate<N> {
             });
         }
 
-        meta.create_gate("range gate acc", |meta| {
-            let sel = meta.query_fixed(acc_sel, Rotation::cur());
-            let acc = meta.query_advice(acc, Rotation::cur());
+        meta.create_gate("range gate compact", |meta| {
+            let sel = meta.query_fixed(compact_sel, Rotation::cur());
+            let compact = meta.query_advice(compact, Rotation::cur());
 
             assert!(ADV_COLUMNS >= COMPACT_CELLS);
-            let shift = Expression::Constant(N::from(1u64 << BITS));
-            let mut acc_value = meta.query_advice(var_cols[0], Rotation::cur());
-            for i in 1..COMPACT_CELLS {
-                acc_value =
-                    acc_value * shift.clone() + meta.query_advice(var_cols[i], Rotation::cur());
+            let mut compact_value = compact;
+            for i in 0..COMPACT_CELLS {
+                compact_value = compact_value
+                    - meta.query_advice(var_cols[i], Rotation::cur())
+                        * Expression::Constant(N::from(1u64 << (i * BITS)));
             }
 
-            vec![sel * (acc - acc_value)]
+            vec![sel * compact_value]
         });
 
         meta.create_gate("range gate sum_limit", |meta| {
@@ -97,9 +103,136 @@ impl<N: FieldExt> RangeGate<N> {
             var_cols,
             sum_limit,
             sum_limit_sel,
-            acc,
-            acc_sel,
+            compact,
+            compact_sel,
             ubits_table,
         }
+    }
+}
+
+impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
+    pub fn init(&self) -> Result<(), Error> {
+        for i in 0..1 << BITS {
+            self.region.assign_fixed(
+                || "init",
+                self.range_gate_config.ubits_table,
+                i as usize,
+                || Ok(N::from(i)),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn assign_compact_cell(&mut self, value: Option<N>) -> Result<AssignedValue<N>, Error> {
+        self.region.assign_fixed(
+            || "assign_compact_cell",
+            self.range_gate_config.compact_sel,
+            self.offset,
+            || Ok(N::one()),
+        )?;
+        let assigned = self.region.assign_advice(
+            || "assign_compact_cell",
+            self.range_gate_config.compact,
+            self.offset,
+            || Ok(value.unwrap()),
+        )?;
+        let cell = assigned.cell();
+
+        // Skip on non-advices-assignment stage
+        if assigned.value().is_some() {
+            self.compact_values.push(value.unwrap_or(N::zero()));
+            self.compact_rows.push(self.offset);
+        }
+
+        self.offset += 1;
+
+        Ok(AssignedValue { value, cell })
+    }
+
+    pub fn finalize_compact_cells(&mut self) -> Result<(), Error> {
+        for (offset, value) in self.compact_rows.iter().zip(self.compact_values.iter()) {
+            // TOOPTIMIZED: use GPU to batch all operations.
+            let mut value_bn = field_to_bn(value);
+            for i in 0..COMPACT_CELLS {
+                self.region.assign_advice(
+                    || "assign_compact_cell",
+                    self.range_gate_config.var_cols[i],
+                    *offset,
+                    || {
+                        let v = (&value_bn & BigUint::from((1u64 << BITS) - 1)).to_field();
+                        value_bn >>= BITS as u32;
+                        Ok(v)
+                    },
+                )?;
+            }
+            assert!(value_bn.is_zero());
+        }
+        self.compact_values.clear();
+        self.compact_rows.clear();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::range_gate::RangeGate;
+    use crate::util::test::*;
+    use ark_std::{end_timer, start_timer};
+    use floor_planner::V1;
+    use halo2_proofs::circuit::*;
+    use halo2_proofs::pairing::bn256::Fr;
+    use halo2_proofs::plonk::*;
+
+    #[derive(Clone, Debug)]
+    struct RangeTestCircuit {}
+
+    impl Circuit<Fr> for RangeTestCircuit {
+        type Config = RangeGateConfig;
+        type FloorPlanner = V1;
+
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> RangeGateConfig {
+            RangeGate::<Fr>::configure(meta)
+        }
+
+        fn without_witnesses(&self) -> Self {
+            self.clone()
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            layouter: impl Layouter<Fr>,
+        ) -> Result<(), Error> {
+            let timer = start_timer!(|| "synthesize");
+            layouter.assign_region(
+                || "range_gate",
+                |region| {
+                    let mut context = RangeRegionContext::new(region, &config);
+
+                    context.init()?;
+
+                    let mut v = Fr::zero();
+                    for _ in 0..(1 << 20) - 30 {
+                        context.assign_compact_cell(Some(v))?;
+                        v += Fr::one();
+                    }
+
+                    let timer = start_timer!(|| "finalize_compact_cells");
+                    context.finalize_compact_cells()?;
+                    end_timer!(timer);
+
+                    Ok(())
+                },
+            )?;
+            end_timer!(timer);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_range_gate() {
+        run_circuit_on_bn256(RangeTestCircuit {}, 20);
+        bench_circuit_on_bn256(RangeTestCircuit {}, 20);
     }
 }

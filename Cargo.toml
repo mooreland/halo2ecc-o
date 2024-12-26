@@ -7,12 +7,13 @@ authors = ["Ooglayout"]
 
 [dependencies]
 ark-std = { version = "0.4.0" }
-halo2_proofs = { git = "https://github.com/DelphinusLab/halo2-gpu-specific.git", default-features = true}
+halo2_proofs = { git = "https://github.com/DelphinusLab/halo2-gpu-specific.git", branch = "moore/logup_extent", default-features = true}
 lazy_static = "1.5.0"
 num-integer = "0.1"
 num-bigint = { version = "0.4.5", features = ["rand"] }
 num-traits = "0.2.18"
 rayon = "1.5.2"
+zkwasm-prover = { git = "https://github.com/DelphinusLab/zkWasm-prover", branch = "oogl/logup-oogl-dev-msm" }
 
 [dev-dependencies]
 chrono = "0.4.19"
