@@ -1,11 +1,23 @@
 use halo2_proofs::arithmetic::{BaseExt, FieldExt};
 use halo2_proofs::circuit::{Cell, Region};
 
+use super::plonk_gate::PlonkGateConfig;
 use super::range_gate::RangeGateConfig;
 
 pub struct PlonkRegionContext<'a, N: FieldExt> {
     pub(crate) region: &'a Region<'a, N>,
+    pub(crate) plonk_gate_config: &'a PlonkGateConfig,
     pub offset: usize,
+}
+
+impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
+    pub fn new(region: &'a Region<'a, N>, plonk_gate_config: &'a PlonkGateConfig) -> Self {
+        Self {
+            region,
+            plonk_gate_config,
+            offset: 0,
+        }
+    }
 }
 
 pub struct RangeRegionContext<'a, N: FieldExt> {

@@ -1,3 +1,5 @@
+#![feature(iter_collect_into)]
+
 pub mod circuit;
 
 mod range_info;

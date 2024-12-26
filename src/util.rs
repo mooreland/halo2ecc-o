@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::BaseExt, dev::MockProver, pairing::bn256::Fr, plonk::*};
+use halo2_proofs::{arithmetic::BaseExt, pairing::bn256::Fr, plonk::*};
 use num_bigint::BigUint;
 use num_traits::Num;
 
