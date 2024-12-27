@@ -239,35 +239,77 @@ mod test {
             layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
             let timer = start_timer!(|| "synthesize");
+
             layouter.assign_region(
                 || "range_gate",
                 |region| {
-                    let mut context = PlonkRegionContext::new(region, &config);
+                    let adv_test_cell = region.assign_advice(
+                        || "assign sum",
+                        config.var[0],
+                        (1 << 20) - 30,
+                        || Ok(Fr::zero()),
+                    )?;
 
-                    let timer = start_timer!(|| "assign_one_line");
-                    for _ in 0..1 {
-                        //(1 << 19) - 30 {
-                        context.assign_one_line(
-                            &self
-                                .vars
-                                .iter()
-                                .zip(self.coeffs.iter())
-                                .take(VAR_COLUMNS)
-                                .map(|(v, c)| (v.into(), c))
-                                .collect::<Vec<_>>(),
-                            None,
-                            Some(-self.sum),
-                            &self.coeffs[VAR_COLUMNS..VAR_COLUMNS + MUL_COLUMNS],
-                            Some(self.coeffs[VAR_COLUMNS + MUL_COLUMNS]),
-                        )?;
+                    let fix_test_cell = region.assign_fixed(
+                        || "assign sum",
+                        config.coeff[0],
+                        (1 << 20) - 30,
+                        || Ok(Fr::zero()),
+                    )?;
 
-                        context.assign_one_line_last_var((&self.vars[VAR_COLUMNS]).into())?;
+                    // Skip shape stage
+                    if adv_test_cell.value().is_none() && fix_test_cell.value().is_none() {
+                        return Ok(())
                     }
-                    end_timer!(timer);
 
+                    std::thread::scope(|s| {
+                        let timer = start_timer!(|| "assign_one_line");
+                        let size = (1 << 19) - 30;
+                        let threads = 32;
+                        let size_per_thread = size / threads;
+                        let mut tasks = vec![];
+                        for i in 0..threads {
+                            let _region = region.clone();
+                            let config = config.clone();
+                            let t = s.spawn(move || {
+                                let region = _region;
+                                let mut context = PlonkRegionContext::new(&region, &config);
+                                context.set_offset(size_per_thread * i * 2);
+                                let start = size_per_thread * i;
+                                let end = size.min(size_per_thread * (i + 1));
+                                for _ in start..end {
+                                    context
+                                        .assign_one_line(
+                                            &self
+                                                .vars
+                                                .iter()
+                                                .zip(self.coeffs.iter())
+                                                .take(VAR_COLUMNS)
+                                                .map(|(v, c)| (v.into(), c))
+                                                .collect::<Vec<_>>(),
+                                            None,
+                                            Some(-self.sum),
+                                            &self.coeffs[VAR_COLUMNS..VAR_COLUMNS + MUL_COLUMNS],
+                                            Some(self.coeffs[VAR_COLUMNS + MUL_COLUMNS]),
+                                        )
+                                        .unwrap();
+
+                                    context
+                                        .assign_one_line_last_var((&self.vars[VAR_COLUMNS]).into())
+                                        .unwrap();
+                                }
+                            });
+                            tasks.push(t);
+                        }
+                        for t in tasks {
+                            t.join().unwrap();
+                        }
+                        end_timer!(timer);
+                    });
                     Ok(())
                 },
             )?;
+
             end_timer!(timer);
             Ok(())
         }

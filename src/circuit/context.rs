@@ -18,6 +18,10 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
             offset: 0,
         }
     }
+
+    pub fn set_offset(&mut self, offset: usize) {
+        self.offset = offset;
+    }
 }
 
 pub struct RangeRegionContext<'a, N: FieldExt> {
