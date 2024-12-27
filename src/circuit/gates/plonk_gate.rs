@@ -7,7 +7,10 @@ use halo2_proofs::{
 };
 use std::marker::PhantomData;
 
-use crate::{assign::AssignedValue, context::PlonkRegionContext};
+use crate::{
+    assign::{AssignedValue, MayAssignedValue},
+    context::PlonkRegionContext,
+};
 
 pub const VAR_COLUMNS: usize = 5;
 pub const MUL_COLUMNS: usize = 2;
@@ -100,49 +103,32 @@ impl<N: FieldExt> Assigner<N> for N {
     }
 }
 
-impl<'a, N: FieldExt> Assigner<N> for &'a N {
-    fn cell(&self) -> Option<Cell> {
-        None
-    }
-
-    fn value(&self) -> Option<N> {
-        Some(**self)
-    }
-}
-
 impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
     pub fn assign_one_line_last_var(
         &mut self,
-        value: Option<N>,
+        value: MayAssignedValue<N>,
     ) -> Result<AssignedValue<N>, Error> {
-        let cell = self.region.assign_advice(
-            || "",
-            self.plonk_gate_config.var[VAR_COLUMNS - 1],
-            self.offset,
-            || Ok(value.unwrap()),
-        )?;
-        self.offset += 1;
-        Ok(AssignedValue {
-            value,
-            cell: cell.cell(),
-        })
+        let cells = self.assign_one_line(&[], Some(value), None, &[], None)?;
+
+        Ok(cells[VAR_COLUMNS - 1].unwrap())
     }
 
     pub fn assign_one_line<'b>(
         &mut self,
-        vars: impl Iterator<Item = (&'b dyn Assigner<N>, N)>,
+        vars: &[(MayAssignedValue<N>, N)],
+        last_var: Option<MayAssignedValue<N>>,
         constant: Option<N>,
-        mul_coeff: impl Iterator<Item = N>,
+        mul_coeff: &[N],
         next_coeff: Option<N>,
     ) -> Result<[Option<AssignedValue<N>>; VAR_COLUMNS], Error> {
         let mut res = [None; VAR_COLUMNS];
 
-        for (i, (assigner, coeff)) in vars.enumerate() {
+        for (i, (assigner, coeff)) in vars.into_iter().enumerate() {
             self.region.assign_fixed(
                 || "",
                 self.plonk_gate_config.coeff[i],
                 self.offset,
-                || Ok(coeff),
+                || Ok(*coeff),
             )?;
 
             let cell = self.region.assign_advice(
@@ -162,12 +148,30 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
             });
         }
 
-        for (i, coeff) in mul_coeff.enumerate() {
+        if let Some(last_var) = last_var {
+            let cell = self.region.assign_advice(
+                || "",
+                self.plonk_gate_config.var[VAR_COLUMNS - 1],
+                self.offset,
+                || Ok(last_var.value().unwrap()),
+            )?;
+
+            if let Some(assigner_cell) = last_var.cell() {
+                self.region.constrain_equal(assigner_cell, cell.cell())?;
+            }
+
+            res[VAR_COLUMNS - 1] = Some(AssignedValue {
+                value: last_var.value(),
+                cell: cell.cell(),
+            });
+        }
+
+        for (i, coeff) in mul_coeff.into_iter().enumerate() {
             self.region.assign_fixed(
                 || "",
                 self.plonk_gate_config.mul_coeff[i],
                 self.offset,
-                || Ok(coeff),
+                || Ok(*coeff),
             )?;
         }
 
@@ -208,8 +212,9 @@ mod test {
 
     #[derive(Clone, Debug)]
     struct PlonkTestCircuit {
-        diff_at: usize,
-        diff_val: Fr,
+        vars: [Option<Fr>; VAR_COLUMNS + 1],
+        coeffs: [Fr; VAR_COLUMNS + MUL_COLUMNS + 1],
+        sum: Fr,
     }
 
     impl Circuit<Fr> for PlonkTestCircuit {
@@ -222,8 +227,9 @@ mod test {
 
         fn without_witnesses(&self) -> Self {
             Self {
-                diff_at: 0usize,
-                diff_val: Fr::zero(),
+                vars: [None; VAR_COLUMNS + 1],
+                coeffs: self.coeffs.clone(),
+                sum: self.sum,
             }
         }
 
@@ -238,35 +244,26 @@ mod test {
                 |region| {
                     let mut context = PlonkRegionContext::new(region, &config);
 
-                    for _ in 0..10 {
-                        let mut values = [0; VAR_COLUMNS * 2 + MUL_COLUMNS + 2].map(|_| Fr::rand());
-
-                        let mut sum = values
-                            .chunks(2)
-                            .take(VAR_COLUMNS)
-                            .fold(Fr::zero(), |acc, x| acc + x[0] * x[1]);
-                        for i in 0..MUL_COLUMNS {
-                            sum += values[i * 4] * values[i * 4 + 2] * values[VAR_COLUMNS * 2 + i];
-                        }
-                        sum += values[VAR_COLUMNS * 2 + MUL_COLUMNS]
-                            * values[VAR_COLUMNS * 2 + MUL_COLUMNS + 1];
-
-                        values[self.diff_at] += self.diff_val;
-
+                    let timer = start_timer!(|| "assign_one_line");
+                    for _ in 0..1 {
+                        //(1 << 19) - 30 {
                         context.assign_one_line(
-                            values
-                                .chunks(2)
+                            &self
+                                .vars
+                                .iter()
+                                .zip(self.coeffs.iter())
                                 .take(VAR_COLUMNS)
-                                .map(|x| (&x[0] as _, x[1])),
-                            Some(-sum),
-                            values.iter().skip(VAR_COLUMNS * 2).take(MUL_COLUMNS),
-                            Some(values[VAR_COLUMNS * 2 + MUL_COLUMNS]),
+                                .map(|(v, c)| (v.into(), c))
+                                .collect::<Vec<_>>(),
+                            None,
+                            Some(-self.sum),
+                            &self.coeffs[VAR_COLUMNS..VAR_COLUMNS + MUL_COLUMNS],
+                            Some(self.coeffs[VAR_COLUMNS + MUL_COLUMNS]),
                         )?;
 
-                        context.assign_one_line_last_var(Some(
-                            values[VAR_COLUMNS * 2 + MUL_COLUMNS + 1],
-                        ))?;
+                        context.assign_one_line_last_var((&self.vars[VAR_COLUMNS]).into())?;
                     }
+                    end_timer!(timer);
 
                     Ok(())
                 },
@@ -276,27 +273,46 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_range_gate_success() {
-        run_circuit_on_bn256(
-            PlonkTestCircuit {
-                diff_at: 0,
-                diff_val: Fr::zero(),
-            },
-            19,
-        );
+    fn gen_random_plonk_gate_test_circuit() -> PlonkTestCircuit {
+        let vars = [0; VAR_COLUMNS + 1].map(|_| Fr::rand());
+        let coeffs = [0; VAR_COLUMNS + MUL_COLUMNS + 1].map(|_| Fr::rand());
+
+        let mut sum = vars
+            .iter()
+            .zip(coeffs.iter())
+            .take(VAR_COLUMNS)
+            .fold(Fr::zero(), |acc, x| acc + x.0 * x.1);
+
+        for i in 0..MUL_COLUMNS {
+            sum += vars[i * 2] * vars[i * 2 + 1] * coeffs[VAR_COLUMNS + i];
+        }
+
+        sum += vars[VAR_COLUMNS] * coeffs[VAR_COLUMNS + MUL_COLUMNS];
+
+        PlonkTestCircuit {
+            vars: vars.map(|x| Some(x)),
+            coeffs,
+            sum,
+        }
     }
 
     #[test]
-    fn test_range_gate_fail() {
-        for i in 0..VAR_COLUMNS * 2 + MUL_COLUMNS + 2 {
-            run_circuit_on_bn256_expect_fail(
-                PlonkTestCircuit {
-                    diff_at: i,
-                    diff_val: Fr::one(),
-                },
-                19,
-            );
+    fn bench_plonk_gate() {
+        bench_circuit_on_bn256(gen_random_plonk_gate_test_circuit(), 20);
+    }
+
+    #[test]
+    fn test_plonk_gate_success() {
+        run_circuit_on_bn256(gen_random_plonk_gate_test_circuit(), 20);
+    }
+
+    #[test]
+    fn test_plonk_gate_fail() {
+        for i in 0..VAR_COLUMNS + 1 {
+            let mut circuit = gen_random_plonk_gate_test_circuit();
+            circuit.vars[i].as_mut().map(|x| *x += Fr::one());
+
+            run_circuit_on_bn256_expect_fail(circuit, 20);
         }
     }
 }
