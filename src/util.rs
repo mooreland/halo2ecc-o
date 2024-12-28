@@ -51,6 +51,7 @@ impl<'a, F: BaseExt> ToField<F> for &'a BigUint {
 pub(crate) mod test {
     use super::*;
     use ark_std::{end_timer, start_timer};
+    use halo2_proofs::plonk::Circuit;
     use halo2_proofs::{arithmetic::BaseExt, dev::MockProver, pairing::bn256::Fr};
 
     #[test]

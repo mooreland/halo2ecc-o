@@ -1,7 +1,7 @@
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 use crate::{
-    assign::{AssignedValue, MayAssignedValue},
+    assign::{AssignedCondition, AssignedValue, MayAssignedValue},
     context::PlonkRegionContext,
     plonk_gate::{MUL_COLUMNS, VAR_COLUMNS},
 };
@@ -98,6 +98,12 @@ pub trait NativeChipOps<N: FieldExt> {
         let one = N::one();
 
         self.one_line_add([pair!(a, -one), pair!(b, one)].into_iter(), None)?;
+        Ok(())
+    }
+
+    fn assert_equal_constant(&mut self, a: &AssignedValue<N>, b: N) -> Result<(), Error> {
+        let one = N::one();
+        self.one_line_add([pair!(a, -one)].into_iter(), Some(b))?;
         Ok(())
     }
 
@@ -232,6 +238,48 @@ pub trait NativeChipOps<N: FieldExt> {
 
         Ok(cells.1)
     }
+
+    fn invert_unsafe(&mut self, a: &AssignedValue<N>) -> Result<AssignedValue<N>, Error> {
+        let b = a.value().map(|a| a.invert().unwrap());
+
+        let one = N::one();
+        let zero = N::zero();
+
+        let cells = self.one_line(
+            [pair!(a, zero), pair!(&b, zero)].into_iter(),
+            Some(-one),
+            ([one], None),
+        )?;
+
+        Ok(cells[1].unwrap())
+    }
+
+    fn invert(
+        &mut self,
+        a: &AssignedValue<N>,
+    ) -> Result<(AssignedCondition<N>, AssignedValue<N>), Error> {
+        let zero = N::zero();
+        let one = N::one();
+        let b = a.value().map(|a| a.invert().unwrap_or(zero));
+        let c = (|| Some(one - a.value()? * b?))();
+
+        // a * c = 0, one of them must be zero
+        let cells = self.one_line(
+            [pair!(a, zero), pair!(&c, zero)].into_iter(),
+            None,
+            ([one], None),
+        )?;
+        let c = cells[1].unwrap();
+
+        // a * b + c = 1
+        let cells = self.one_line(
+            [pair!(a, zero), pair!(&b, zero), pair!(&c, one)].into_iter(),
+            Some(-one),
+            ([one], None),
+        )?;
+
+        Ok((cells[2].unwrap().into(), cells[1].unwrap()))
+    }
 }
 
 #[cfg(test)]
@@ -242,6 +290,7 @@ mod test {
     use ark_std::{end_timer, start_timer};
     use floor_planner::V1;
     use halo2_proofs::arithmetic::BaseExt;
+    use halo2_proofs::arithmetic::Field;
     use halo2_proofs::circuit::*;
     use halo2_proofs::pairing::bn256::Fr;
     use halo2_proofs::plonk::*;
@@ -293,6 +342,16 @@ mod test {
         Ok((a, context.assign(a)?))
     }
 
+    fn random_and_assign_non_zero(
+        context: &mut PlonkRegionContext<'_, Fr>,
+    ) -> Result<(Fr, AssignedValue<Fr>), Error> {
+        let mut a = Fr::rand();
+        while a.is_zero_vartime() {
+            a = Fr::rand();
+        }
+        Ok((a, context.assign(a)?))
+    }
+
     fn fill_add_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
         for _ in 1..10 {
             let (a, assigned_a) = random_and_assign(context)?;
@@ -315,8 +374,8 @@ mod test {
             let c = a - b + if is_eq { Fr::zero() } else { Fr::one() };
             let assigned_c = context.assign(c)?;
 
-            let sum = context.sub(&assigned_a, &assigned_b)?;
-            context.assert_equal(&assigned_c, &sum)?;
+            let res = context.sub(&assigned_a, &assigned_b)?;
+            context.assert_equal(&assigned_c, &res)?;
         }
         Ok(())
     }
@@ -329,8 +388,8 @@ mod test {
             let c = a * b + if is_eq { Fr::zero() } else { Fr::one() };
             let assigned_c = context.assign(c)?;
 
-            let sum = context.mul(&assigned_a, &assigned_b)?;
-            context.assert_equal(&assigned_c, &sum)?;
+            let res = context.mul(&assigned_a, &assigned_b)?;
+            context.assert_equal(&assigned_c, &res)?;
         }
         Ok(())
     }
@@ -426,6 +485,54 @@ mod test {
         Ok(())
     }
 
+    fn fill_invert_unsafe(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign_non_zero(context)?;
+
+            let c = a.invert().unwrap() + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_c = context.assign(c)?;
+
+            let res = context.invert_unsafe(&assigned_a)?;
+            context.assert_equal(&assigned_c, &res)?;
+        }
+        Ok(())
+    }
+
+    fn fill_invert_non_zero(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign_non_zero(context)?;
+
+            let c = a.invert().unwrap() + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_c = context.assign(c)?;
+
+            let (o, res) = context.invert(&assigned_a)?;
+            context.assert_equal(&assigned_c, &res)?;
+            context.assert_equal_constant(o.as_ref(), Fr::zero())?;
+        }
+        Ok(())
+    }
+
+    fn fill_invert_zero(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for _ in 1..10 {
+            let assigned_zero = context.assign_constant(Fr::zero())?;
+            let (o, _) = context.invert(&assigned_zero)?;
+            context.assert_equal_constant(
+                o.as_ref(),
+                Fr::one() + if is_eq { Fr::zero() } else { Fr::one() },
+            )?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_native_chip_success() {
         run_circuit_on_bn256(
@@ -433,12 +540,17 @@ mod test {
                 fill: |context| {
                     let is_eq = true;
                     fill_sum_with_constant_test(context, is_eq)?;
+
                     fill_add_constant_test(context, is_eq)?;
                     fill_add_test(context, is_eq)?;
                     fill_sub_test(context, is_eq)?;
                     fill_mul_add_constant_test(context, is_eq)?;
                     fill_mul_add_test(context, is_eq)?;
                     fill_mul_test(context, is_eq)?;
+
+                    fill_invert_unsafe(context, is_eq)?;
+                    fill_invert_non_zero(context, is_eq)?;
+                    fill_invert_zero(context, is_eq)?;
                     Ok(())
                 },
             },
@@ -448,47 +560,28 @@ mod test {
 
     #[test]
     fn test_native_chip_fail() {
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_sum_with_constant_test(context, false),
-            },
-            19,
-        );
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_add_constant_test(context, false),
-            },
-            19,
-        );
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_add_test(context, false),
-            },
-            19,
-        );
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_sub_test(context, false),
-            },
-            19,
-        );
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_mul_add_test(context, false),
-            },
-            19,
-        );
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_mul_test(context, false),
-            },
-            19,
-        );
-        run_circuit_on_bn256_expect_fail(
-            TestCircuit {
-                fill: |context| fill_mul_add_constant_test(context, false),
-            },
-            19,
-        );
+        macro_rules! test_fail {
+            ($f: expr) => {
+                run_circuit_on_bn256_expect_fail(
+                    TestCircuit {
+                        fill: |context| $f(context, false),
+                    },
+                    19,
+                );
+            };
+        }
+
+        test_fail!(fill_sum_with_constant_test);
+
+        test_fail!(fill_add_constant_test);
+        test_fail!(fill_add_test);
+        test_fail!(fill_sub_test);
+        test_fail!(fill_mul_add_test);
+        test_fail!(fill_mul_test);
+        test_fail!(fill_mul_add_constant_test);
+
+        test_fail!(fill_invert_unsafe);
+        test_fail!(fill_invert_non_zero);
+        test_fail!(fill_invert_zero);
     }
 }

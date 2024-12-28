@@ -20,12 +20,51 @@ impl<N: FieldExt> AssignedValue<N> {
 }
 
 #[derive(Copy, Clone, Debug)]
+pub struct AssignedCondition<N: FieldExt> {
+    pub(crate) value: Option<N>,
+    pub(crate) cell: Cell,
+}
+
+impl<N: FieldExt> AssignedCondition<N> {
+    pub fn value(&self) -> Option<N> {
+        self.value
+    }
+
+    pub fn cell(&self) -> Cell {
+        self.cell
+    }
+}
+
+impl<'a, N: FieldExt> From<AssignedCondition<N>> for AssignedValue<N> {
+    fn from(v: AssignedCondition<N>) -> Self {
+        Self {
+            value: v.value,
+            cell: v.cell,
+        }
+    }
+}
+
+impl<'a, N: FieldExt> From<AssignedValue<N>> for AssignedCondition<N> {
+    fn from(v: AssignedValue<N>) -> Self {
+        Self {
+            value: v.value,
+            cell: v.cell,
+        }
+    }
+}
+
+impl<N: FieldExt> AsRef<AssignedValue<N>> for AssignedCondition<N> {
+    fn as_ref(&self) -> &AssignedValue<N> {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 struct AssignedInt<W: BaseExt, N: FieldExt> {
     pub(crate) value: Option<W>,
     pub(crate) limbs_le: [AssignedValue<N>; MAX_LIMBS],
     pub(crate) times: usize,
 }
-
 
 pub trait MayAssignedValue<N: FieldExt> {
     fn value(&self) -> Option<N>;
