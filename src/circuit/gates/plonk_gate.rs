@@ -1,7 +1,6 @@
 use ark_std::iterable::Iterable;
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::Cell,
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
     poly::Rotation,
 };
@@ -78,52 +77,27 @@ impl<N: FieldExt> PlonkGate<N> {
     }
 }
 
-pub trait Assigner<N: FieldExt> {
-    fn cell(&self) -> Option<Cell>;
-    fn value(&self) -> Option<N>;
-}
-
-impl<N: FieldExt> Assigner<N> for AssignedValue<N> {
-    fn cell(&self) -> Option<Cell> {
-        Some(self.cell)
-    }
-
-    fn value(&self) -> Option<N> {
-        self.value
-    }
-}
-
-impl<N: FieldExt> Assigner<N> for N {
-    fn cell(&self) -> Option<Cell> {
-        None
-    }
-
-    fn value(&self) -> Option<N> {
-        Some(*self)
-    }
-}
-
 impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
     pub fn assign_one_line_last_var(
         &mut self,
         value: MayAssignedValue<N>,
     ) -> Result<AssignedValue<N>, Error> {
-        let cells = self.assign_one_line(&[], Some(value), None, &[], None)?;
+        let cells = self.assign_one_line(&[], Some((value, N::zero())), None, &[], None)?;
 
         Ok(cells[VAR_COLUMNS - 1].unwrap())
     }
 
     pub fn assign_one_line<'b>(
         &mut self,
-        vars: &[(MayAssignedValue<N>, N)],
-        last_var: Option<MayAssignedValue<N>>,
+        var_coeff_pairs: &[(MayAssignedValue<N>, N)],
+        last_var_pair: Option<(MayAssignedValue<N>, N)>,
         constant: Option<N>,
         mul_coeff: &[N],
         next_coeff: Option<N>,
     ) -> Result<[Option<AssignedValue<N>>; VAR_COLUMNS], Error> {
         let mut res = [None; VAR_COLUMNS];
 
-        for (i, (assigner, coeff)) in vars.into_iter().enumerate() {
+        for (i, (assigner, coeff)) in var_coeff_pairs.into_iter().enumerate() {
             self.region.assign_fixed(
                 || "",
                 self.plonk_gate_config.coeff[i],
@@ -148,7 +122,14 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
             });
         }
 
-        if let Some(last_var) = last_var {
+        if let Some((last_var, coeff)) = last_var_pair {
+            self.region.assign_fixed(
+                || "",
+                self.plonk_gate_config.coeff[VAR_COLUMNS - 1],
+                self.offset,
+                || Ok(coeff),
+            )?;
+
             let cell = self.region.assign_advice(
                 || "",
                 self.plonk_gate_config.var[VAR_COLUMNS - 1],
@@ -215,6 +196,7 @@ mod test {
         vars: [Option<Fr>; VAR_COLUMNS + 1],
         coeffs: [Fr; VAR_COLUMNS + MUL_COLUMNS + 1],
         sum: Fr,
+        k: usize,
     }
 
     impl Circuit<Fr> for PlonkTestCircuit {
@@ -230,6 +212,7 @@ mod test {
                 vars: [None; VAR_COLUMNS + 1],
                 coeffs: self.coeffs.clone(),
                 sum: self.sum,
+                k: self.k,
             }
         }
 
@@ -246,25 +229,25 @@ mod test {
                     let adv_test_cell = region.assign_advice(
                         || "assign sum",
                         config.var[0],
-                        (1 << 20) - 30,
+                        (1 << self.k) - 30,
                         || Ok(Fr::zero()),
                     )?;
 
                     let fix_test_cell = region.assign_fixed(
                         || "assign sum",
                         config.coeff[0],
-                        (1 << 20) - 30,
+                        (1 << self.k) - 30,
                         || Ok(Fr::zero()),
                     )?;
 
                     // Skip shape stage
                     if adv_test_cell.value().is_none() && fix_test_cell.value().is_none() {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     std::thread::scope(|s| {
                         let timer = start_timer!(|| "assign_one_line");
-                        let size = (1 << 19) - 30;
+                        let size = (1 << (self.k - 1)) - 30;
                         let threads = 32;
                         let size_per_thread = size / threads;
                         let mut tasks = vec![];
@@ -315,7 +298,7 @@ mod test {
         }
     }
 
-    fn gen_random_plonk_gate_test_circuit() -> PlonkTestCircuit {
+    fn gen_random_plonk_gate_test_circuit(k: usize) -> PlonkTestCircuit {
         let vars = [0; VAR_COLUMNS + 1].map(|_| Fr::rand());
         let coeffs = [0; VAR_COLUMNS + MUL_COLUMNS + 1].map(|_| Fr::rand());
 
@@ -335,26 +318,27 @@ mod test {
             vars: vars.map(|x| Some(x)),
             coeffs,
             sum,
+            k,
         }
     }
 
     #[test]
     fn bench_plonk_gate() {
-        bench_circuit_on_bn256(gen_random_plonk_gate_test_circuit(), 20);
+        bench_circuit_on_bn256(gen_random_plonk_gate_test_circuit(20), 20);
     }
 
     #[test]
     fn test_plonk_gate_success() {
-        run_circuit_on_bn256(gen_random_plonk_gate_test_circuit(), 20);
+        run_circuit_on_bn256(gen_random_plonk_gate_test_circuit(8), 19);
     }
 
     #[test]
     fn test_plonk_gate_fail() {
         for i in 0..VAR_COLUMNS + 1 {
-            let mut circuit = gen_random_plonk_gate_test_circuit();
+            let mut circuit = gen_random_plonk_gate_test_circuit(8);
             circuit.vars[i].as_mut().map(|x| *x += Fr::one());
 
-            run_circuit_on_bn256_expect_fail(circuit, 20);
+            run_circuit_on_bn256_expect_fail(circuit, 19);
         }
     }
 }
