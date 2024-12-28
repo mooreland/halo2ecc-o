@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::BaseExt, pairing::bn256::Fr, plonk::*};
+use halo2_proofs::{arithmetic::BaseExt, pairing::bn256::Fr};
 use num_bigint::BigUint;
 use num_traits::Num;
 
@@ -51,13 +51,7 @@ impl<'a, F: BaseExt> ToField<F> for &'a BigUint {
 pub(crate) mod test {
     use super::*;
     use ark_std::{end_timer, start_timer};
-    use halo2_proofs::{
-        arithmetic::BaseExt,
-        dev::MockProver,
-        pairing::bn256::{Bn256, Fr, G1Affine},
-        poly::commitment::{Params, ParamsVerifier},
-        transcript::{Blake2bRead, Blake2bWrite, Challenge255},
-    };
+    use halo2_proofs::{arithmetic::BaseExt, dev::MockProver, pairing::bn256::Fr};
 
     #[test]
     fn test_bn_conversion() {
@@ -70,6 +64,7 @@ pub(crate) mod test {
         end_timer!(timer);
     }
 
+    #[cfg(feature = "profile")]
     pub(crate) fn bench_circuit_on_bn256<C: Circuit<Fr>>(circuit: C, k: u32) {
         use std::sync::Arc;
         use zkwasm_prover::{create_proof_from_advices_with_shplonk, prepare_advice_buffer};

@@ -108,10 +108,10 @@ pub trait NativeChipOps<N: FieldExt> {
     ) -> Result<AssignedValue<N>, Error> {
         let sum = elems
             .clone()
-            .map(|(x, y)| x.value().map(|x| x * y))
-            .reduce(|acc, x| acc.and_then(|acc| x.map(|x| acc + x)))
+            .map(|(x, y)| Some(x.value()? * y))
+            .reduce(|acc, x| Some(acc? + x?))
             .unwrap();
-        let sum = constant.map_or_else(|| sum, |x| sum.map(|sum| sum + x));
+        let sum = constant.map_or_else(|| sum, |x| Some(sum? + x));
 
         let cells = self.one_line_with_last(
             elems.map(|(a, b)| (a as _, b)),
@@ -143,6 +143,95 @@ pub trait NativeChipOps<N: FieldExt> {
             Ok(acc)
         }
     }
+
+    fn add(
+        &mut self,
+        a: &AssignedValue<N>,
+        b: &AssignedValue<N>,
+    ) -> Result<AssignedValue<N>, Error> {
+        assert!(self.var_columns() >= 3);
+
+        let one = N::one();
+        self.sum_with_constant(&[(a, one), (b, one)], None)
+    }
+
+    fn add_constant(&mut self, a: &AssignedValue<N>, c: N) -> Result<AssignedValue<N>, Error> {
+        assert!(self.var_columns() >= 2);
+
+        let one = N::one();
+        self.sum_with_constant(&[(a, one)], Some(c))
+    }
+
+    fn sub(
+        &mut self,
+        a: &AssignedValue<N>,
+        b: &AssignedValue<N>,
+    ) -> Result<AssignedValue<N>, Error> {
+        assert!(self.var_columns() >= 3);
+
+        let one = N::one();
+        self.sum_with_constant(&[(a, one), (b, -one)], None)
+    }
+
+    fn mul(
+        &mut self,
+        a: &AssignedValue<N>,
+        b: &AssignedValue<N>,
+    ) -> Result<AssignedValue<N>, Error> {
+        self.mul_add_constant(a, b, None)
+    }
+
+    fn mul_add_constant(
+        &mut self,
+        a: &AssignedValue<N>,
+        b: &AssignedValue<N>,
+        c: Option<N>,
+    ) -> Result<AssignedValue<N>, Error> {
+        assert!(self.var_columns() >= 3);
+        assert!(self.mul_columns() >= 1);
+
+        let one = N::one();
+        let zero = N::zero();
+
+        let d = || -> Option<N> { Some(a.value()? * b.value()?) }();
+        let d = c.map_or_else(|| d, |c| Some(d? + c));
+
+        let cells = self.one_line_with_last(
+            [pair!(a, zero), pair!(b, zero)].into_iter(),
+            pair!(&d, -one),
+            c,
+            ([one], None),
+        )?;
+
+        Ok(cells.1)
+    }
+
+    fn mul_add(
+        &mut self,
+        a: &AssignedValue<N>,
+        b: &AssignedValue<N>,
+        ab_coeff: N,
+        c: &AssignedValue<N>,
+        c_coeff: N,
+    ) -> Result<AssignedValue<N>, Error> {
+        assert!(self.var_columns() >= 4);
+        assert!(self.mul_columns() >= 1);
+
+        let one = N::one();
+        let zero = N::zero();
+
+        let d =
+            || -> Option<N> { Some(a.value()? * b.value()? * ab_coeff + c.value()? * c_coeff) }();
+
+        let cells = self.one_line_with_last(
+            [pair!(a, zero), pair!(b, zero), pair!(c, c_coeff)].into_iter(),
+            pair!(&d, -one),
+            None,
+            ([ab_coeff], None),
+        )?;
+
+        Ok(cells.1)
+    }
 }
 
 #[cfg(test)]
@@ -158,11 +247,13 @@ mod test {
     use halo2_proofs::plonk::*;
 
     #[derive(Clone, Debug)]
-    struct TestCircuit {
-        is_eq: bool,
+    struct TestCircuit<F: Clone + Fn(&mut PlonkRegionContext<'_, Fr>) -> Result<(), Error>> {
+        fill: F,
     }
 
-    impl Circuit<Fr> for TestCircuit {
+    impl<F: Clone + Fn(&mut PlonkRegionContext<'_, Fr>) -> Result<(), Error>> Circuit<Fr>
+        for TestCircuit<F>
+    {
         type Config = PlonkGateConfig;
         type FloorPlanner = V1;
 
@@ -185,35 +276,7 @@ mod test {
                 |region| {
                     let mut context = PlonkRegionContext::new(&region, &config);
 
-                    // test sum_with_constant()
-                    for i in 1..20 {
-                        // gen vars
-                        let mut elems = vec![];
-                        let mut assigned = vec![];
-                        let mut sum = Fr::zero();
-                        for _ in 0..=i {
-                            assigned.push(context.assign(Fr::rand())?);
-                        }
-
-                        for _ in 0..i {
-                            let c = Fr::rand();
-                            elems.push((&assigned[i], c));
-                            sum += assigned[i].value().unwrap() * c;
-                        }
-
-                        // gen constant
-                        let c = Fr::rand();
-                        sum += c;
-
-                        if !self.is_eq {
-                            sum += Fr::one();
-                        }
-
-                        let expect = context.assign(sum)?;
-                        let res = context.sum_with_constant(&elems[..], Some(c))?;
-
-                        context.assert_equal(&res, &expect)?;
-                    }
+                    (self.fill)(&mut context)?;
 
                     Ok(())
                 },
@@ -223,13 +286,209 @@ mod test {
         }
     }
 
+    fn random_and_assign(
+        context: &mut PlonkRegionContext<'_, Fr>,
+    ) -> Result<(Fr, AssignedValue<Fr>), Error> {
+        let a = Fr::rand();
+        Ok((a, context.assign(a)?))
+    }
+
+    fn fill_add_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign(context)?;
+            let (b, assigned_b) = random_and_assign(context)?;
+
+            let c = a + b + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_c = context.assign(c)?;
+
+            let sum = context.add(&assigned_a, &assigned_b)?;
+            context.assert_equal(&assigned_c, &sum)?;
+        }
+        Ok(())
+    }
+
+    fn fill_sub_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign(context)?;
+            let (b, assigned_b) = random_and_assign(context)?;
+
+            let c = a - b + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_c = context.assign(c)?;
+
+            let sum = context.sub(&assigned_a, &assigned_b)?;
+            context.assert_equal(&assigned_c, &sum)?;
+        }
+        Ok(())
+    }
+
+    fn fill_mul_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign(context)?;
+            let (b, assigned_b) = random_and_assign(context)?;
+
+            let c = a * b + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_c = context.assign(c)?;
+
+            let sum = context.mul(&assigned_a, &assigned_b)?;
+            context.assert_equal(&assigned_c, &sum)?;
+        }
+        Ok(())
+    }
+
+    fn fill_add_constant_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign(context)?;
+            let b = Fr::rand();
+
+            let c = a + b + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_c = context.assign(c)?;
+
+            let sum = context.add_constant(&assigned_a, b)?;
+            context.assert_equal(&assigned_c, &sum)?;
+        }
+        Ok(())
+    }
+
+    fn fill_mul_add_constant_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign(context)?;
+            let (b, assigned_b) = random_and_assign(context)?;
+            let c = Fr::rand();
+
+            let acc = a * b + c + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_acc = context.assign(acc)?;
+
+            let res = context.mul_add_constant(&assigned_a, &assigned_b, Some(c))?;
+            context.assert_equal(&assigned_acc, &res)?;
+        }
+        Ok(())
+    }
+
+    fn fill_mul_add_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for _ in 1..10 {
+            let (a, assigned_a) = random_and_assign(context)?;
+            let (b, assigned_b) = random_and_assign(context)?;
+            let ab_coeff = Fr::rand();
+            let (c, assigned_c) = random_and_assign(context)?;
+            let c_coeff = Fr::rand();
+
+            let acc = a * b * ab_coeff + c * c_coeff + if is_eq { Fr::zero() } else { Fr::one() };
+            let assigned_acc = context.assign(acc)?;
+
+            let res = context.mul_add(&assigned_a, &assigned_b, ab_coeff, &assigned_c, c_coeff)?;
+            context.assert_equal(&assigned_acc, &res)?;
+        }
+        Ok(())
+    }
+
+    fn fill_sum_with_constant_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_eq: bool,
+    ) -> Result<(), Error> {
+        for i in 1..10 {
+            // gen vars
+            let mut elems = vec![];
+            let mut assigned = vec![];
+            let mut sum = Fr::zero();
+            for _ in 0..=i {
+                assigned.push(context.assign(Fr::rand())?);
+            }
+
+            for _ in 0..i {
+                let c = Fr::rand();
+                elems.push((&assigned[i], c));
+                sum += assigned[i].value().unwrap() * c;
+            }
+
+            // gen constant
+            let c = Fr::rand();
+            sum += c;
+
+            // failure test
+            if !is_eq {
+                sum += Fr::one();
+            }
+
+            let expect = context.assign(sum)?;
+            let res = context.sum_with_constant(&elems[..], Some(c))?;
+
+            context.assert_equal(&res, &expect)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_native_chip_success() {
-        run_circuit_on_bn256(TestCircuit { is_eq: true }, 19);
+        run_circuit_on_bn256(
+            TestCircuit {
+                fill: |context| {
+                    let is_eq = true;
+                    fill_sum_with_constant_test(context, is_eq)?;
+                    fill_add_constant_test(context, is_eq)?;
+                    fill_add_test(context, is_eq)?;
+                    fill_sub_test(context, is_eq)?;
+                    fill_mul_add_constant_test(context, is_eq)?;
+                    fill_mul_add_test(context, is_eq)?;
+                    fill_mul_test(context, is_eq)?;
+                    Ok(())
+                },
+            },
+            19,
+        );
     }
 
     #[test]
     fn test_native_chip_fail() {
-        run_circuit_on_bn256_expect_fail(TestCircuit { is_eq: false }, 19);
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_sum_with_constant_test(context, false),
+            },
+            19,
+        );
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_add_constant_test(context, false),
+            },
+            19,
+        );
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_add_test(context, false),
+            },
+            19,
+        );
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_sub_test(context, false),
+            },
+            19,
+        );
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_mul_add_test(context, false),
+            },
+            19,
+        );
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_mul_test(context, false),
+            },
+            19,
+        );
+        run_circuit_on_bn256_expect_fail(
+            TestCircuit {
+                fill: |context| fill_mul_add_constant_test(context, false),
+            },
+            19,
+        );
     }
 }

@@ -1,5 +1,5 @@
-use halo2_proofs::arithmetic::{BaseExt, FieldExt};
-use halo2_proofs::circuit::{Cell, Region};
+use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::circuit::Region;
 
 use super::plonk_gate::PlonkGateConfig;
 use super::range_gate::RangeGateConfig;
@@ -31,6 +31,13 @@ pub struct RangeRegionContext<'a, N: FieldExt> {
     pub(crate) compact_rows: Vec<usize>,
     pub(crate) free_common_cells: Vec<(usize, usize)>,
     pub offset: usize,
+}
+
+impl<'a, N: FieldExt> Drop for RangeRegionContext<'a, N> {
+    fn drop(&mut self) {
+        assert!(self.compact_values.is_empty());
+        assert!(self.compact_rows.is_empty());
+    }
 }
 
 impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
