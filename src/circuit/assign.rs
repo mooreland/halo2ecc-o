@@ -9,6 +9,16 @@ pub struct AssignedValue<N: FieldExt> {
     pub(crate) cell: Cell,
 }
 
+impl<N: FieldExt> AssignedValue<N> {
+    pub fn value(&self) -> Option<N> {
+        self.value
+    }
+
+    pub fn cell(&self) -> Cell {
+        self.cell
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct AssignedInt<W: BaseExt, N: FieldExt> {
     pub(crate) value: Option<W>,
@@ -16,56 +26,71 @@ struct AssignedInt<W: BaseExt, N: FieldExt> {
     pub(crate) times: usize,
 }
 
-pub enum MayAssignedValue<'a, N: FieldExt> {
-    Assigned(&'a AssignedValue<N>),
-    Unassigned(&'a N),
-    UnassignedOwned(N),
+
+pub trait MayAssignedValue<N: FieldExt> {
+    fn value(&self) -> Option<N>;
+    fn cell(&self) -> Option<Cell>;
 }
 
-impl<'a, N: FieldExt> MayAssignedValue<'a, N> {
-    pub fn value(&self) -> Option<N> {
+impl<N: FieldExt> MayAssignedValue<N> for AssignedValue<N> {
+    fn value(&self) -> Option<N> {
+        self.value
+    }
+
+    fn cell(&self) -> Option<Cell> {
+        Some(self.cell)
+    }
+}
+
+impl<'a, N: FieldExt> MayAssignedValue<N> for &'a AssignedValue<N> {
+    fn value(&self) -> Option<N> {
+        self.value
+    }
+
+    fn cell(&self) -> Option<Cell> {
+        Some(self.cell)
+    }
+}
+
+impl<N: FieldExt> MayAssignedValue<N> for N {
+    fn value(&self) -> Option<N> {
+        Some(*self)
+    }
+
+    fn cell(&self) -> Option<Cell> {
+        None
+    }
+}
+
+impl<'a, N: FieldExt> MayAssignedValue<N> for &'a N {
+    fn value(&self) -> Option<N> {
+        Some(**self)
+    }
+
+    fn cell(&self) -> Option<Cell> {
+        None
+    }
+}
+
+impl<'a, N: FieldExt> MayAssignedValue<N> for &'a Option<N> {
+    fn value(&self) -> Option<N> {
         match self {
-            MayAssignedValue::Assigned(assigned) => assigned.value,
-            MayAssignedValue::Unassigned(value) => Some(**value),
-            MayAssignedValue::UnassignedOwned(value) => Some(*value),
+            Some(value) => Some(*value),
+            None => None,
         }
     }
 
-    pub fn cell(&self) -> Option<Cell> {
-        match self {
-            MayAssignedValue::Assigned(assigned) => Some(assigned.cell),
-            MayAssignedValue::Unassigned(_) => None,
-            MayAssignedValue::UnassignedOwned(_) => None,
-        }
+    fn cell(&self) -> Option<Cell> {
+        None
     }
 }
 
-impl<'a, N: FieldExt> From<&'a AssignedValue<N>> for MayAssignedValue<'a, N> {
-    fn from(assigned: &'a AssignedValue<N>) -> Self {
-        MayAssignedValue::Assigned(&assigned)
+impl<N: FieldExt> MayAssignedValue<N> for Option<N> {
+    fn value(&self) -> Option<N> {
+        self.clone()
     }
-}
 
-impl<'a, N: FieldExt> From<&'a N> for MayAssignedValue<'a, N> {
-    fn from(value: &'a N) -> Self {
-        MayAssignedValue::Unassigned(value)
-    }
-}
-
-impl<'a, N: FieldExt> From<&'a Option<N>> for MayAssignedValue<'a, N> {
-    fn from(value: &'a Option<N>) -> Self {
-        match value {
-            Some(value) => MayAssignedValue::Unassigned(value),
-            None => MayAssignedValue::UnassignedOwned(N::zero()),
-        }
-    }
-}
-
-impl<'a, N: FieldExt> From<Option<N>> for MayAssignedValue<'a, N> {
-    fn from(value: Option<N>) -> Self {
-        match value {
-            Some(value) => MayAssignedValue::UnassignedOwned(value),
-            None => MayAssignedValue::UnassignedOwned(N::zero()),
-        }
+    fn cell(&self) -> Option<Cell> {
+        None
     }
 }

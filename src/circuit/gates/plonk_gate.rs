@@ -80,29 +80,33 @@ impl<N: FieldExt> PlonkGate<N> {
 impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
     pub fn assign_one_line_last_var(
         &mut self,
-        value: MayAssignedValue<N>,
+        value: &dyn MayAssignedValue<N>,
     ) -> Result<AssignedValue<N>, Error> {
-        let cells = self.assign_one_line(&[], Some((value, N::zero())), None, &[], None)?;
+        let cells =
+            self.assign_one_line([].into_iter(), Some((value, N::zero())), None, [], None)?;
 
         Ok(cells[VAR_COLUMNS - 1].unwrap())
     }
 
-    pub fn assign_one_line<'b>(
+    pub fn assign_one_line<'b, const L: usize>(
         &mut self,
-        var_coeff_pairs: &[(MayAssignedValue<N>, N)],
-        last_var_pair: Option<(MayAssignedValue<N>, N)>,
+        var_coeff_pairs: impl Iterator<Item = (&'b dyn MayAssignedValue<N>, N)>,
+        last_var_pair: Option<(&'b dyn MayAssignedValue<N>, N)>,
         constant: Option<N>,
-        mul_coeff: &[N],
+        mul_coeff: [N; L],
         next_coeff: Option<N>,
     ) -> Result<[Option<AssignedValue<N>>; VAR_COLUMNS], Error> {
         let mut res = [None; VAR_COLUMNS];
 
-        for (i, (assigner, coeff)) in var_coeff_pairs.into_iter().enumerate() {
+        for (i, (assigner, coeff)) in var_coeff_pairs.enumerate() {
+            assert!(i < VAR_COLUMNS);
+            assert!(i < VAR_COLUMNS - 1 || last_var_pair.is_none());
+
             self.region.assign_fixed(
                 || "",
                 self.plonk_gate_config.coeff[i],
                 self.offset,
-                || Ok(*coeff),
+                || Ok(coeff),
             )?;
 
             let cell = self.region.assign_advice(
@@ -152,7 +156,7 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
                 || "",
                 self.plonk_gate_config.mul_coeff[i],
                 self.offset,
-                || Ok(*coeff),
+                || Ok(coeff),
             )?;
         }
 
@@ -262,23 +266,24 @@ mod test {
                                 let end = size.min(size_per_thread * (i + 1));
                                 for _ in start..end {
                                     context
-                                        .assign_one_line(
-                                            &self
-                                                .vars
+                                        .assign_one_line::<MUL_COLUMNS>(
+                                            self.vars[..]
                                                 .iter()
                                                 .zip(self.coeffs.iter())
                                                 .take(VAR_COLUMNS)
-                                                .map(|(v, c)| (v.into(), c))
-                                                .collect::<Vec<_>>(),
+                                                .map(|(v, c)| (v as _, c)),
                                             None,
                                             Some(-self.sum),
-                                            &self.coeffs[VAR_COLUMNS..VAR_COLUMNS + MUL_COLUMNS],
+                                            self.coeffs[VAR_COLUMNS..VAR_COLUMNS + MUL_COLUMNS]
+                                                .to_vec()
+                                                .try_into()
+                                                .unwrap(),
                                             Some(self.coeffs[VAR_COLUMNS + MUL_COLUMNS]),
                                         )
                                         .unwrap();
 
                                     context
-                                        .assign_one_line_last_var((&self.vars[VAR_COLUMNS]).into())
+                                        .assign_one_line_last_var(&self.vars[VAR_COLUMNS])
                                         .unwrap();
                                 }
                             });
@@ -323,8 +328,9 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature="profile")]
     fn bench_plonk_gate() {
-        bench_circuit_on_bn256(gen_random_plonk_gate_test_circuit(20), 20);
+        bench_circuit_on_bn256(gen_random_plonk_gate_test_circuit(22), 22);
     }
 
     #[test]

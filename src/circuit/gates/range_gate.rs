@@ -318,6 +318,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature="profile")]
     fn bench_range_gate() {
         bench_circuit_on_bn256(
             RangeTestCircuit {

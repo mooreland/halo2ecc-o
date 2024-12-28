@@ -140,7 +140,7 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
             limb_modulus,
             limb_coeffs: (0..limbs)
                 .into_iter()
-                .map(|i| bn_to_field(&(BigUint::from(1u64) << (i * limb_bits))))
+                .map(|i| N::from(2u64).pow_vartime([i * limb_bits]))
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap(),
