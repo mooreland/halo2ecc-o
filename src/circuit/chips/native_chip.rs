@@ -3,6 +3,7 @@ use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 use crate::{
     assign::{AssignedCondition, AssignedValue, MayAssignedValue},
     context::PlonkRegionContext,
+    pair,
     plonk_gate::{MUL_COLUMNS, VAR_COLUMNS},
 };
 
@@ -48,12 +49,6 @@ impl<'a, N: FieldExt> NativeChipOps<N> for PlonkRegionContext<'a, N> {
     }
 }
 
-macro_rules! pair {
-    ($a:expr, $b:expr) => {
-        ($a as _, $b)
-    };
-}
-
 pub trait NativeChipOps<N: FieldExt> {
     fn var_columns(&mut self) -> usize;
     fn mul_columns(&mut self) -> usize;
@@ -89,6 +84,11 @@ pub trait NativeChipOps<N: FieldExt> {
     }
 
     fn assign(&mut self, v: N) -> Result<AssignedValue<N>, Error> {
+        self.assign_opt(Some(v))
+    }
+
+    // Witness is None in vkey setup stage.
+    fn assign_opt(&mut self, v: Option<N>) -> Result<AssignedValue<N>, Error> {
         let zero = N::zero();
         let cells = self.one_line_add([pair!(&v, zero)].into_iter(), None)?;
         Ok(cells[0].unwrap())

@@ -1,4 +1,5 @@
 #![feature(iter_collect_into)]
+#[macro_use]
 
 pub mod circuit;
 

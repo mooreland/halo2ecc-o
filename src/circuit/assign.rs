@@ -35,7 +35,7 @@ impl<N: FieldExt> AssignedCondition<N> {
     }
 }
 
-impl<'a, N: FieldExt> From<AssignedCondition<N>> for AssignedValue<N> {
+impl<N: FieldExt> From<AssignedCondition<N>> for AssignedValue<N> {
     fn from(v: AssignedCondition<N>) -> Self {
         Self {
             value: v.value,
@@ -44,7 +44,7 @@ impl<'a, N: FieldExt> From<AssignedCondition<N>> for AssignedValue<N> {
     }
 }
 
-impl<'a, N: FieldExt> From<AssignedValue<N>> for AssignedCondition<N> {
+impl<N: FieldExt> From<AssignedValue<N>> for AssignedCondition<N> {
     fn from(v: AssignedValue<N>) -> Self {
         Self {
             value: v.value,
