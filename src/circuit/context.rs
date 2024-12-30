@@ -1,9 +1,15 @@
-use halo2_proofs::arithmetic::FieldExt;
+use std::sync::Arc;
+
+use halo2_proofs::arithmetic::{BaseExt, FieldExt};
 use halo2_proofs::circuit::Region;
 
+use crate::range_info::RangeInfo;
+
+use super::assign::{AssignedInteger, AssignedValue, MAX_LIMBS};
 use super::plonk_gate::PlonkGateConfig;
 use super::range_gate::RangeGateConfig;
 
+#[derive(Clone, Copy, Debug)]
 pub struct PlonkRegionContext<'a, N: FieldExt> {
     pub(crate) region: &'a Region<'a, N>,
     pub(crate) plonk_gate_config: &'a PlonkGateConfig,
@@ -21,6 +27,39 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
 
     pub fn set_offset(&mut self, offset: usize) {
         self.offset = offset;
+    }
+}
+
+pub struct IntegerContext<'a, W: BaseExt, N: FieldExt> {
+    pub(crate) plonk_region_context: PlonkRegionContext<'a, N>,
+    pub(crate) range_region_context: RangeRegionContext<'a, N>,
+    pub(crate) info: Arc<RangeInfo<W, N>>,
+    pub(crate) int_mul_queue: Vec<(
+        AssignedInteger<W, N>,
+        AssignedInteger<W, N>,
+        [Option<AssignedValue<N>>; MAX_LIMBS],
+        AssignedInteger<W, N>,
+    )>,
+}
+
+impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
+    pub fn new(
+        plonk_region_context: PlonkRegionContext<'a, N>,
+        range_region_context: RangeRegionContext<'a, N>,
+        info: Arc<RangeInfo<W, N>>,
+    ) -> Self {
+        Self {
+            plonk_region_context,
+            range_region_context,
+            info,
+            int_mul_queue: vec![],
+        }
+    }
+}
+
+impl<'a, W: BaseExt, N: FieldExt> Drop for IntegerContext<'a, W, N> {
+    fn drop(&mut self) {
+        assert!(self.int_mul_queue.is_empty())
     }
 }
 

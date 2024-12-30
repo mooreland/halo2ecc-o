@@ -20,7 +20,7 @@ const BITS: usize = COMMON_RANGE_BITS as usize; // value is 18
 const ADV_COLUMNS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
 const COMPACT_CELLS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
 
-// const COMPACT_BITS: usize = BITS * COMPACT_CELLS; // value is 108
+pub(crate) const COMPACT_BITS: usize = BITS * COMPACT_CELLS; // value is 108
 
 #[derive(Clone, Debug)]
 pub struct RangeGateConfig {

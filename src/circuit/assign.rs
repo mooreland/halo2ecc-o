@@ -1,7 +1,10 @@
+use std::marker::PhantomData;
+
 use halo2_proofs::arithmetic::{BaseExt, FieldExt};
 use halo2_proofs::circuit::Cell;
+use num_bigint::BigUint;
 
-const MAX_LIMBS: usize = 3;
+pub const MAX_LIMBS: usize = 3;
 
 #[derive(Copy, Clone, Debug)]
 pub struct AssignedValue<N: FieldExt> {
@@ -59,11 +62,29 @@ impl<N: FieldExt> AsRef<AssignedValue<N>> for AssignedCondition<N> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-struct AssignedInt<W: BaseExt, N: FieldExt> {
-    pub(crate) value: Option<W>,
-    pub(crate) limbs_le: [AssignedValue<N>; MAX_LIMBS],
+#[derive(Clone, Debug)]
+pub struct AssignedInteger<W: BaseExt, N: FieldExt> {
+    pub(crate) value: Option<BigUint>,
+    pub(crate) limbs_le: [Option<AssignedValue<N>>; MAX_LIMBS],
+    pub(crate) native: AssignedValue<N>,
     pub(crate) times: usize,
+    phantom: PhantomData<W>,
+}
+
+impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
+    pub fn new(
+        limbs_le: [Option<AssignedValue<N>>; MAX_LIMBS],
+        native: AssignedValue<N>,
+        value: Option<BigUint>,
+    ) -> Self {
+        Self {
+            value,
+            native,
+            limbs_le,
+            times: 1,
+            phantom: PhantomData,
+        }
+    }
 }
 
 pub trait MayAssignedValue<N: FieldExt> {
