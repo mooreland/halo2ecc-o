@@ -280,6 +280,30 @@ pub trait NativeChipOps<N: FieldExt> {
 
         Ok((cells[2].unwrap().into(), cells[1].unwrap()))
     }
+
+    fn is_zero(&mut self, a: &AssignedValue<N>) -> Result<AssignedCondition<N>, Error> {
+        Ok(self.invert(a)?.0)
+    }
+
+    fn div_unsafe(
+        &mut self,
+        a: &AssignedValue<N>,
+        b: &AssignedValue<N>,
+    ) -> Result<AssignedValue<N>, Error> {
+        let c = (|| Some(b.value()?.invert().unwrap() * a.value()?))();
+
+        let one = N::one();
+        let zero = N::zero();
+
+        // b * c = a
+        let cells = self.one_line(
+            [pair!(b, zero), pair!(&c, zero), pair!(a, -one)].into_iter(),
+            None,
+            ([one], None),
+        )?;
+
+        Ok(cells[1].unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -294,6 +318,8 @@ mod test {
     use halo2_proofs::circuit::*;
     use halo2_proofs::pairing::bn256::Fr;
     use halo2_proofs::plonk::*;
+    use rand::Rng;
+    use rand_core::OsRng;
 
     #[derive(Clone, Debug)]
     struct TestCircuit<F: Clone + Fn(&mut PlonkRegionContext<'_, Fr>) -> Result<(), Error>> {
@@ -352,109 +378,105 @@ mod test {
         Ok((a, context.assign(a)?))
     }
 
-    fn fill_add_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign(context)?;
-            let (b, assigned_b) = random_and_assign(context)?;
+    fn fill_add_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        let (a, assigned_a) = random_and_assign(context)?;
+        let (b, assigned_b) = random_and_assign(context)?;
 
-            let c = a + b + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_c = context.assign(c)?;
+        let c = a + b + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_c = context.assign(c)?;
 
-            let sum = context.add(&assigned_a, &assigned_b)?;
-            context.assert_equal(&assigned_c, &sum)?;
-        }
+        let sum = context.add(&assigned_a, &assigned_b)?;
+        context.assert_equal(&assigned_c, &sum)?;
         Ok(())
     }
 
-    fn fill_sub_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign(context)?;
-            let (b, assigned_b) = random_and_assign(context)?;
+    fn fill_sub_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        let (a, assigned_a) = random_and_assign(context)?;
+        let (b, assigned_b) = random_and_assign(context)?;
 
-            let c = a - b + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_c = context.assign(c)?;
+        let c = a - b + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_c = context.assign(c)?;
 
-            let res = context.sub(&assigned_a, &assigned_b)?;
-            context.assert_equal(&assigned_c, &res)?;
-        }
+        let res = context.sub(&assigned_a, &assigned_b)?;
+        context.assert_equal(&assigned_c, &res)?;
         Ok(())
     }
 
-    fn fill_mul_test(context: &mut PlonkRegionContext<'_, Fr>, is_eq: bool) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign(context)?;
-            let (b, assigned_b) = random_and_assign(context)?;
+    fn fill_mul_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        let (a, assigned_a) = random_and_assign(context)?;
+        let (b, assigned_b) = random_and_assign(context)?;
 
-            let c = a * b + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_c = context.assign(c)?;
+        let c = a * b + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_c = context.assign(c)?;
 
-            let res = context.mul(&assigned_a, &assigned_b)?;
-            context.assert_equal(&assigned_c, &res)?;
-        }
+        let res = context.mul(&assigned_a, &assigned_b)?;
+        context.assert_equal(&assigned_c, &res)?;
         Ok(())
     }
 
     fn fill_add_constant_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign(context)?;
-            let b = Fr::rand();
+        let (a, assigned_a) = random_and_assign(context)?;
+        let b = Fr::rand();
 
-            let c = a + b + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_c = context.assign(c)?;
+        let c = a + b + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_c = context.assign(c)?;
 
-            let sum = context.add_constant(&assigned_a, b)?;
-            context.assert_equal(&assigned_c, &sum)?;
-        }
+        let sum = context.add_constant(&assigned_a, b)?;
+        context.assert_equal(&assigned_c, &sum)?;
         Ok(())
     }
 
     fn fill_mul_add_constant_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign(context)?;
-            let (b, assigned_b) = random_and_assign(context)?;
-            let c = Fr::rand();
+        let (a, assigned_a) = random_and_assign(context)?;
+        let (b, assigned_b) = random_and_assign(context)?;
+        let c = Fr::rand();
 
-            let acc = a * b + c + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_acc = context.assign(acc)?;
+        let acc = a * b + c + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_acc = context.assign(acc)?;
 
-            let res = context.mul_add_constant(&assigned_a, &assigned_b, Some(c))?;
-            context.assert_equal(&assigned_acc, &res)?;
-        }
+        let res = context.mul_add_constant(&assigned_a, &assigned_b, Some(c))?;
+        context.assert_equal(&assigned_acc, &res)?;
         Ok(())
     }
 
     fn fill_mul_add_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign(context)?;
-            let (b, assigned_b) = random_and_assign(context)?;
-            let ab_coeff = Fr::rand();
-            let (c, assigned_c) = random_and_assign(context)?;
-            let c_coeff = Fr::rand();
+        let (a, assigned_a) = random_and_assign(context)?;
+        let (b, assigned_b) = random_and_assign(context)?;
+        let ab_coeff = Fr::rand();
+        let (c, assigned_c) = random_and_assign(context)?;
+        let c_coeff = Fr::rand();
 
-            let acc = a * b * ab_coeff + c * c_coeff + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_acc = context.assign(acc)?;
+        let acc = a * b * ab_coeff + c * c_coeff + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_acc = context.assign(acc)?;
 
-            let res = context.mul_add(&assigned_a, &assigned_b, ab_coeff, &assigned_c, c_coeff)?;
-            context.assert_equal(&assigned_acc, &res)?;
-        }
+        let res = context.mul_add(&assigned_a, &assigned_b, ab_coeff, &assigned_c, c_coeff)?;
+        context.assert_equal(&assigned_acc, &res)?;
         Ok(())
     }
 
     fn fill_sum_with_constant_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
         for i in 1..10 {
-            // gen vars
             let mut elems = vec![];
             let mut assigned = vec![];
             let mut sum = Fr::zero();
@@ -473,7 +495,7 @@ mod test {
             sum += c;
 
             // failure test
-            if !is_eq {
+            if !is_success {
                 sum += Fr::one();
             }
 
@@ -485,50 +507,100 @@ mod test {
         Ok(())
     }
 
-    fn fill_invert_unsafe(
+    fn fill_invert_unsafe_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign_non_zero(context)?;
+        let (a, assigned_a) = random_and_assign_non_zero(context)?;
 
-            let c = a.invert().unwrap() + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_c = context.assign(c)?;
+        let c = a.invert().unwrap() + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_c = context.assign(c)?;
 
-            let res = context.invert_unsafe(&assigned_a)?;
-            context.assert_equal(&assigned_c, &res)?;
-        }
+        let res = context.invert_unsafe(&assigned_a)?;
+        context.assert_equal(&assigned_c, &res)?;
         Ok(())
     }
 
-    fn fill_invert_non_zero(
+    fn fill_invert_non_zero_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
-        for _ in 1..10 {
-            let (a, assigned_a) = random_and_assign_non_zero(context)?;
+        let (a, assigned_a) = random_and_assign_non_zero(context)?;
 
-            let c = a.invert().unwrap() + if is_eq { Fr::zero() } else { Fr::one() };
-            let assigned_c = context.assign(c)?;
+        let c = a.invert().unwrap() + if is_success { Fr::zero() } else { Fr::one() };
+        let assigned_c = context.assign(c)?;
 
-            let (o, res) = context.invert(&assigned_a)?;
-            context.assert_equal(&assigned_c, &res)?;
-            context.assert_equal_constant(o.as_ref(), Fr::zero())?;
-        }
+        let (o, res) = context.invert(&assigned_a)?;
+        context.assert_equal(&assigned_c, &res)?;
+        context.assert_equal_constant(o.as_ref(), Fr::zero())?;
         Ok(())
     }
 
-    fn fill_invert_zero(
+    fn fill_invert_zero_test(
         context: &mut PlonkRegionContext<'_, Fr>,
-        is_eq: bool,
+        is_success: bool,
     ) -> Result<(), Error> {
-        for _ in 1..10 {
+        let assigned_zero = context.assign_constant(Fr::zero())?;
+        let (o, _) = context.invert(&assigned_zero)?;
+        context.assert_equal_constant(
+            o.as_ref(),
+            Fr::one() + if is_success { Fr::zero() } else { Fr::one() },
+        )?;
+        Ok(())
+    }
+
+    fn fill_is_zero_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
             let assigned_zero = context.assign_constant(Fr::zero())?;
-            let (o, _) = context.invert(&assigned_zero)?;
-            context.assert_equal_constant(
-                o.as_ref(),
-                Fr::one() + if is_eq { Fr::zero() } else { Fr::one() },
-            )?;
+            let o = context.is_zero(&assigned_zero)?;
+            context.assert_equal_constant(o.as_ref(), Fr::one())?;
+            let (_, assigned_non_zero) = random_and_assign_non_zero(context)?;
+            let o = context.is_zero(&assigned_non_zero)?;
+            context.assert_equal_constant(o.as_ref(), Fr::zero())?;
+        } else {
+            let case = OsRng.gen_range(0..2);
+            match case {
+                0 => {
+                    let assigned_zero = context.assign_constant(Fr::zero())?;
+                    let o = context.is_zero(&assigned_zero)?;
+                    context.assert_equal_constant(o.as_ref(), Fr::zero())?;
+                }
+                1 => {
+                    let (_, assigned_non_zero) = random_and_assign_non_zero(context)?;
+                    let o = context.is_zero(&assigned_non_zero)?;
+                    context.assert_equal_constant(o.as_ref(), Fr::one())?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
+    fn fill_div_unsafe_test(
+        context: &mut PlonkRegionContext<'_, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let assigned_zero = context.assign_constant(Fr::zero())?;
+            let (a, assigned_non_zero_a) = random_and_assign_non_zero(context)?;
+            let (b, assigned_non_zero_b) = random_and_assign_non_zero(context)?;
+            let res = context.div_unsafe(&assigned_zero, &assigned_non_zero_a)?;
+            context.assert_equal_constant(&res, Fr::zero())?;
+
+            let res = context.div_unsafe(&assigned_non_zero_b, &assigned_non_zero_a)?;
+            context.assert_equal_constant(&res, a.invert().unwrap() * b)?;
+        } else {
+            let assigned_zero = context.assign_constant(Fr::zero())?;
+            let (a, assigned_non_zero_a) = random_and_assign_non_zero(context)?;
+            let (b, assigned_non_zero_b) = random_and_assign_non_zero(context)?;
+            let res = context.div_unsafe(&assigned_zero, &assigned_non_zero_a)?;
+            context.assert_equal_constant(&res, Fr::one())?;
+
+            let res = context.div_unsafe(&assigned_non_zero_b, &assigned_non_zero_a)?;
+            context.assert_equal_constant(&res, a.invert().unwrap() * b + Fr::one())?;
         }
         Ok(())
     }
@@ -538,19 +610,22 @@ mod test {
         run_circuit_on_bn256(
             TestCircuit {
                 fill: |context| {
-                    let is_eq = true;
-                    fill_sum_with_constant_test(context, is_eq)?;
-
-                    fill_add_constant_test(context, is_eq)?;
-                    fill_add_test(context, is_eq)?;
-                    fill_sub_test(context, is_eq)?;
-                    fill_mul_add_constant_test(context, is_eq)?;
-                    fill_mul_add_test(context, is_eq)?;
-                    fill_mul_test(context, is_eq)?;
-
-                    fill_invert_unsafe(context, is_eq)?;
-                    fill_invert_non_zero(context, is_eq)?;
-                    fill_invert_zero(context, is_eq)?;
+                    for v in [
+                        fill_sum_with_constant_test,
+                        fill_add_constant_test,
+                        fill_add_test,
+                        fill_sub_test,
+                        fill_mul_add_constant_test,
+                        fill_mul_add_test,
+                        fill_mul_test,
+                        fill_invert_unsafe_test,
+                        fill_invert_non_zero_test,
+                        fill_invert_zero_test,
+                        fill_is_zero_test,
+                        fill_div_unsafe_test,
+                    ] {
+                        v(context, true)?;
+                    }
                     Ok(())
                 },
             },
@@ -571,17 +646,23 @@ mod test {
             };
         }
 
-        test_fail!(fill_sum_with_constant_test);
-
-        test_fail!(fill_add_constant_test);
-        test_fail!(fill_add_test);
-        test_fail!(fill_sub_test);
-        test_fail!(fill_mul_add_test);
-        test_fail!(fill_mul_test);
-        test_fail!(fill_mul_add_constant_test);
-
-        test_fail!(fill_invert_unsafe);
-        test_fail!(fill_invert_non_zero);
-        test_fail!(fill_invert_zero);
+        for _ in 0..10 {
+            for v in [
+                fill_sum_with_constant_test,
+                fill_add_constant_test,
+                fill_add_test,
+                fill_sub_test,
+                fill_mul_add_constant_test,
+                fill_mul_add_test,
+                fill_mul_test,
+                fill_invert_unsafe_test,
+                fill_invert_non_zero_test,
+                fill_invert_zero_test,
+                fill_is_zero_test,
+                fill_div_unsafe_test,
+            ] {
+                test_fail!(v);
+            }
+        }
     }
 }
