@@ -18,9 +18,9 @@ use crate::util::*;
 
 const BITS: usize = COMMON_RANGE_BITS as usize; // value is 18
 const ADV_COLUMNS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
-const COMPACT_CELLS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
 
-// const COMPACT_BITS: usize = BITS * COMPACT_CELLS; // value is 108
+pub(crate) const COMPACT_CELLS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
+pub(crate) const COMPACT_BITS: usize = BITS * COMPACT_CELLS; // value is 108
 
 #[derive(Clone, Debug)]
 pub struct RangeGateConfig {
@@ -64,6 +64,8 @@ impl<N: FieldExt> RangeGate<N> {
         let compact = meta.advice_column();
         let compact_sel = meta.fixed_column();
         let ubits_table = meta.fixed_column();
+
+        meta.enable_equality(compact);
 
         for i in 0..ADV_COLUMNS {
             meta.enable_equality(var_cols[i]);
@@ -151,7 +153,7 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
     }
 
     // value <= range
-    pub fn assign_range_cell(
+    pub fn assign_custom_range_cell(
         &mut self,
         value: Option<N>,
         range: N,
@@ -299,7 +301,7 @@ mod test {
                     context.finalize_compact_cells()?;
                     end_timer!(timer);
 
-                    context.assign_range_cell(
+                    context.assign_custom_range_cell(
                         Some(Fr::from(self.range_value)),
                         Fr::from(self.range_limit),
                     )?;

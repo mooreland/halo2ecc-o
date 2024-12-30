@@ -75,10 +75,9 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
         }
     }
 
-    pub fn new(common_bits: u64, overflow_bits: u64) -> Self {
-        // Add assert to make it easy to review.
-        assert_eq!(common_bits, COMMON_RANGE_BITS);
-        assert_eq!(overflow_bits, OVERFLOW_BITS);
+    pub fn new() -> Self {
+        let common_bits = COMMON_RANGE_BITS;
+        let overflow_bits = OVERFLOW_BITS;
 
         let w_max = field_to_bn(&-W::one());
         let w_ceil_bits = w_max.bits();
@@ -369,7 +368,7 @@ fn test_range_info() {
         use halo2_proofs::pairing::bn256::Fq;
         use halo2_proofs::pairing::bn256::Fr;
 
-        let info = RangeInfo::<Fq, Fr>::new(18, 6);
+        let info = RangeInfo::<Fq, Fr>::new();
         println!("info {:?}", info);
     }
 
@@ -377,7 +376,7 @@ fn test_range_info() {
         use halo2_proofs::pairing::bls12_381::Fr as Bls12_381_Fr;
         use halo2_proofs::pairing::bn256::Fr;
 
-        let info = RangeInfo::<Bls12_381_Fr, Fr>::new(18, 6);
+        let info = RangeInfo::<Bls12_381_Fr, Fr>::new();
         println!("info {:?}", info);
     }
 
@@ -385,7 +384,7 @@ fn test_range_info() {
         use halo2_proofs::pairing::bls12_381::Fq as Bls12_381_Fq;
         use halo2_proofs::pairing::bn256::Fr;
 
-        let info = RangeInfo::<Bls12_381_Fq, Fr>::new(18, 6);
+        let info = RangeInfo::<Bls12_381_Fq, Fr>::new();
         println!("info {:?}", info);
     }
 }

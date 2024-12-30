@@ -634,7 +634,7 @@ mod test {
     }
 
     #[test]
-    fn test_native_chip_fail() {
+    fn test_native_chip_fail1() {
         macro_rules! test_fail {
             ($f: expr) => {
                 run_circuit_on_bn256_expect_fail(
@@ -655,6 +655,27 @@ mod test {
                 fill_mul_add_constant_test,
                 fill_mul_add_test,
                 fill_mul_test,
+            ] {
+                test_fail!(v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_native_chip_fail2() {
+        macro_rules! test_fail {
+            ($f: expr) => {
+                run_circuit_on_bn256_expect_fail(
+                    TestCircuit {
+                        fill: |context| $f(context, false),
+                    },
+                    19,
+                );
+            };
+        }
+
+        for _ in 0..10 {
+            for v in [
                 fill_invert_unsafe_test,
                 fill_invert_non_zero_test,
                 fill_invert_zero_test,

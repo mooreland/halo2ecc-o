@@ -1,6 +1,5 @@
 use crate::range_info::RangeInfo;
-use halo2_proofs::circuit::Region;
-use halo2_proofs::plonk::{Circuit, Expression, VirtualCells};
+use halo2_proofs::plonk::{Expression, VirtualCells};
 use halo2_proofs::{
     arithmetic::FieldExt,
     plonk::{Advice, Column, ConstraintSystem, Fixed},

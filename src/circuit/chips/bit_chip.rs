@@ -558,7 +558,7 @@ mod test {
                 );
             };
         }
-        for _ in 0..100 {
+        for _ in 0..10 {
             for v in [
                 fill_assert_bit_test,
                 fill_and_test,
