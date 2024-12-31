@@ -12,22 +12,12 @@ use crate::{
     context::IntegerContext,
     pair,
     range_gate::{COMPACT_BITS, COMPACT_CELLS},
-    range_info::{RangeInfo, COMMON_RANGE_BITS},
-    util::{bn_to_field, field_to_bn, ToField},
+    range_info::{
+        get_bn_common_range_to_field, get_bn_compact_range,
+        RangeInfo, COMMON_RANGE_BITS,
+    },
+    util::{bn_to_field, field_to_bn, get_n_from_i32, ToField},
 };
-
-fn get_bn_common_range_to_field<N: BaseExt>(bn: &BigUint, i: u64) -> N {
-    let mask = BigUint::from((1u64 << COMMON_RANGE_BITS) - 1);
-    ((bn >> (i * COMMON_RANGE_BITS)) & &mask).to_field()
-}
-
-fn get_n_from_i32<N: FieldExt>(v: i32) -> N {
-    if v >= 0 {
-        N::from(v as u64)
-    } else {
-        N::from((-v) as u64)
-    }
-}
 
 impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
     pub fn info(&self) -> &RangeInfo<W, N> {
@@ -121,6 +111,22 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         Ok(AssignedInteger::new(limbs.try_into().unwrap(), native, w))
     }
 
+    fn limbs_to_native(
+        &mut self,
+        &limbs: &[Option<AssignedValue<N>>; MAX_LIMBS],
+    ) -> Result<AssignedValue<N>, Error> {
+        let native = self.plonk_region_context.sum_with_constant_in_one_line(
+            limbs
+                .iter()
+                .take(self.info().limbs as usize)
+                .map(|x| x.as_ref().unwrap() as _)
+                .zip(self.info.clone().limb_coeffs.iter().cloned()),
+            None,
+        )?;
+
+        Ok(native)
+    }
+
     fn assign_d(
         &mut self,
         d: Option<BigUint>,
@@ -144,14 +150,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             };
         }
 
-        let native = self.plonk_region_context.sum_with_constant_in_one_line(
-            limbs
-                .iter()
-                .take(self.info().limbs as usize)
-                .map(|x| x.as_ref().unwrap() as _)
-                .zip(self.info.clone().limb_coeffs.iter().cloned()),
-            None,
-        )?;
+        let native = self.limbs_to_native(&limbs)?;
 
         Ok((limbs, native))
     }
@@ -204,11 +203,8 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let rem = self.assign_w(rem)?;
         let d = self.assign_d(d)?;
 
-        //println!("offset1 is {}", self.plonk_region_context.offset);
         self.add_constraints_for_mul_equation_on_limbs(a, b, d.0, &rem);
-        //println!("offset2 is {}", self.plonk_region_context.offset);
         self.add_constraints_for_mul_equation_on_native(a, b, &d.1, &rem)?;
-        //println!("offset3 is {}", self.plonk_region_context.offset);
 
         Ok(rem)
     }
@@ -243,6 +239,155 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         }
         Ok(())
     }
+
+    pub fn finalize_int_mul(&mut self) -> Result<(), Error> {
+        let mut queue = vec![];
+        std::mem::swap(&mut queue, &mut self.int_mul_queue);
+
+        for (a, b, d, rem) in &queue {
+            self.assign_int_mul_core(a, b, d, rem)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn reduce(&mut self, a: &AssignedInteger<W, N>) -> Result<AssignedInteger<W, N>, Error> {
+        if a.times == 1 {
+            return Ok(a.clone());
+        }
+
+        let overflow_limit = self.info().overflow_limit;
+        assert!(a.times < overflow_limit as usize);
+
+        // Check a = d * w + rem
+        let a_bn = self.get_w_bn(&a);
+        let (d, rem) = (|| Some(a_bn?.div_rem(&self.info().w_modulus)))().unzip();
+        let assigned_rem = self.assign_w(rem.clone())?;
+
+        // Witness stage, can be batch into GPU
+        let zero = N::zero();
+        let one = N::one();
+
+        let d = (|| Some(bn_to_field(d.as_ref()?)))();
+        let assigned_d = self.range_region_context.assign_common_range_cell(d)?;
+        let d = d.map(|x| field_to_bn(&x));
+
+        // Constrain on native.
+        self.plonk_region_context.one_line(
+            [
+                pair!(&assigned_d, self.info().w_native),
+                pair!(&assigned_rem.native, one),
+                pair!(&a.native, -one),
+            ]
+            .into_iter(),
+            None,
+            ([], None),
+        )?;
+
+        // Check equation on n limbs
+        // so we have
+        // `a = d * w + rem (mod in 2 ^ (limb_bits) ^ n)`
+        // `a = d * w + rem (mod native)`
+        // ->
+        // `a = d * w + rem (mod in lcm(native, 2 ^ (limb_bits) ^ n))`
+
+        // To ensure completeness
+        // `max_a = w_ceil * overflow_limit < lcm(native, 2 ^ (limb_bits) ^ n))`
+
+        // In each limb check, we need to find a `v`, that
+        // `d *w.limb[i] + rem.limb[i] - a.limb[i] + overflow_limit * limb_modulus + carry = v * limb_modulus`
+        // To ensure `v < limb_modulus`
+        // `max(d * w.limb[i] + rem.limb[i] - a.limb[i] + overflow_limit * limb_modulus + carry) / limb_modulus`
+        // = `(common_modulus * limb_modulus + limb_modulus + overflow_limit * limb_modulus + limb_modulus) / limb_modulus`
+        // = `(common_modulus + 1 + overflow_limit + 1)`
+        // = `(common_modulus + overflow_limit + 2)` <= limb_modulus
+
+        let mut last_v: Option<AssignedValue<N>> = None;
+        for i in 0..self.info().reduce_check_limbs as usize {
+            // check equation on ith limbs
+            let last_borrow = if i != 0 { overflow_limit } else { 0 };
+            let carry = (|| Some(field_to_bn(last_v?.value().as_ref()?)))();
+
+            let u: Option<BigUint> = (|| {
+                Some(
+                    d.as_ref()? * &self.info().w_modulus_limbs_le_bn[i]
+                        + get_bn_compact_range(rem.as_ref()?, i as u64)
+                        + &self.info().limb_modulus * overflow_limit
+                        - field_to_bn(&a.limbs_le[i].unwrap().value()?)
+                        + carry.unwrap_or(BigUint::from(0u64))
+                        - last_borrow,
+                )
+            })();
+
+            let (v, _) = (|| Some(u?.div_rem(&self.info().limb_modulus)))().unzip();
+
+            let v = self
+                .range_region_context
+                .assign_common_range_cell(v.map(|v| bn_to_field(&v)))?;
+
+            // constrains on limb_modulus
+            self.plonk_region_context.one_line(
+                [
+                    pair!(&assigned_d, self.info().w_modulus_limbs_le[i]),
+                    pair!(&assigned_rem.limbs_le[i].unwrap(), one),
+                    pair!(&a.limbs_le[i].unwrap(), -one),
+                    pair!(&v, -bn_to_field::<N>(&self.info().limb_modulus)),
+                    match &last_v {
+                        Some(last_v) => pair!(last_v, one),
+                        None => pair!(&zero, zero),
+                    },
+                ]
+                .into_iter(),
+                Some(bn_to_field(
+                    &(&self.info().limb_modulus * overflow_limit
+                        - if i == 0 { 0u64 } else { overflow_limit }),
+                )),
+                ([], None),
+            )?;
+
+            last_v = Some(v);
+        }
+
+        Ok(assigned_rem)
+    }
+
+    pub fn conditionally_reduce(
+        &mut self,
+        a: AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        let threshold = 1 << (self.info().overflow_bits - 2);
+        if a.times > threshold {
+            self.reduce(&a)
+        } else {
+            Ok(a)
+        }
+    }
+
+    pub fn int_add(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        let mut limbs = [None; MAX_LIMBS];
+
+        for i in 0..self.info().limbs as usize {
+            let value = self
+                .plonk_region_context
+                .add(&a.limbs_le[i].unwrap(), &b.limbs_le[i].unwrap())?;
+            limbs[i] = Some(value)
+        }
+
+        let native = self.limbs_to_native(&limbs)?;
+
+        let res = AssignedInteger::new_with_times(
+            limbs.try_into().unwrap(),
+            native,
+            (|| Some(a.value.as_ref()? + b.value.as_ref()?))(),
+            a.times + b.times,
+        );
+
+        self.conditionally_reduce(res)
+    }
 }
 
 #[cfg(test)]
@@ -252,6 +397,8 @@ mod test {
     use super::*;
     use crate::context::PlonkRegionContext;
     use crate::context::RangeRegionContext;
+    use crate::int_mul_gate::IntMulGate;
+    use crate::int_mul_gate::IntMulGateConfig;
     use crate::plonk_gate::*;
     use crate::range_gate::RangeGate;
     use crate::range_gate::RangeGateConfig;
@@ -271,11 +418,15 @@ mod test {
     impl<F: Clone + Fn(&mut IntegerContext<'_, Fq, Fr>) -> Result<(), Error>> Circuit<Fr>
         for TestCircuit<F>
     {
-        type Config = (PlonkGateConfig, RangeGateConfig);
+        type Config = (PlonkGateConfig, RangeGateConfig, IntMulGateConfig);
         type FloorPlanner = V1;
 
         fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
-            (PlonkGate::<Fr>::configure(meta), RangeGate::configure(meta))
+            let plonk_gate_config = PlonkGate::<Fr>::configure(meta);
+            let range_gate_config = RangeGate::configure(meta);
+            let int_mul_gate_config =
+                IntMulGate::configure(meta, plonk_gate_config.var, &RangeInfo::<Fq, Fr>::new());
+            (plonk_gate_config, range_gate_config, int_mul_gate_config)
         }
 
         fn without_witnesses(&self) -> Self {
@@ -296,11 +447,13 @@ mod test {
                     let mut int_context = IntegerContext::new(
                         plonk_region_context,
                         range_region_context,
+                        &config.2,
                         Arc::new(RangeInfo::new()),
                     );
 
                     int_context.range_region_context.init()?;
                     (self.fill)(&mut int_context)?;
+                    int_context.finalize_int_mul()?;
                     int_context.range_region_context.finalize_compact_cells()?;
 
                     Ok(())
@@ -342,6 +495,32 @@ mod test {
         Ok(())
     }
 
+    fn fill_int_add_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign(context)?;
+            let c = a + b;
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_add(&assigned_a, &assigned_b)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_c)?;
+        } else {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign(context)?;
+            let c = a * b + Fq::one();
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_add(&assigned_a, &assigned_b)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_c)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_int_chip_success() {
         run_circuit_on_bn256(
@@ -349,7 +528,7 @@ mod test {
                 fill: |context| {
                     let is_success = true;
 
-                    for v in [fill_int_mul_test] {
+                    for v in [fill_int_mul_test, fill_int_add_test] {
                         v(context, is_success)?;
                     }
 
@@ -374,7 +553,7 @@ mod test {
         }
         //for _ in 0..100 {
         {
-            for v in [fill_int_mul_test] {
+            for v in [fill_int_mul_test, fill_int_add_test] {
                 test_fail!(v);
             }
         }

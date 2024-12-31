@@ -4,12 +4,29 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 use std::marker::PhantomData;
 
+use crate::range_gate::COMPACT_BITS;
 use crate::util::bn_to_field;
 use crate::util::field_to_bn;
+use crate::util::ToField;
 
 pub(crate) const OVERFLOW_BITS: u64 = 6;
 pub(crate) const COMMON_RANGE_BITS: u64 = 18;
 pub(crate) const RANGE_VALUE_DECOMPOSE: u64 = 6;
+
+pub(crate) fn get_bn_compact_range_to_field<N: BaseExt>(bn: &BigUint, i: u64) -> N {
+    let mask = (BigUint::from(1u64) << COMPACT_BITS) - 1u64;
+    ((bn >> (i * COMPACT_BITS as u64)) & &mask).to_field()
+}
+
+pub(crate) fn get_bn_compact_range(bn: &BigUint, i: u64) -> BigUint {
+    let mask = (BigUint::from(1u64) << COMPACT_BITS) - 1u64;
+    (bn >> (i * COMPACT_BITS as u64)) & &mask
+}
+
+pub(crate) fn get_bn_common_range_to_field<N: BaseExt>(bn: &BigUint, i: u64) -> N {
+    let mask = BigUint::from((1u64 << COMMON_RANGE_BITS) - 1);
+    ((bn >> (i * COMMON_RANGE_BITS)) & &mask).to_field()
+}
 
 #[derive(Debug, Clone)]
 pub struct RangeInfo<W: BaseExt, N: FieldExt> {

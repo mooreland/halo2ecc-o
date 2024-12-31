@@ -85,6 +85,21 @@ impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
             phantom: PhantomData,
         }
     }
+
+    pub fn new_with_times(
+        limbs_le: [Option<AssignedValue<N>>; MAX_LIMBS],
+        native: AssignedValue<N>,
+        value: Option<BigUint>,
+        times: usize,
+    ) -> Self {
+        Self {
+            value,
+            native,
+            limbs_le,
+            times,
+            phantom: PhantomData,
+        }
+    }
 }
 
 pub trait MayAssignedValue<N: FieldExt> {

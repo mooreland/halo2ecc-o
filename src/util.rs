@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::BaseExt, pairing::bn256::Fr};
+use halo2_proofs::{arithmetic::{BaseExt, FieldExt}, pairing::bn256::Fr};
 use num_bigint::BigUint;
 use num_traits::Num;
 
@@ -163,5 +163,13 @@ pub(crate) mod test {
             Err(e) => panic!("{:#?}", e),
         };
         assert!(prover.verify().is_err());
+    }
+}
+
+pub(crate) fn get_n_from_i32<N: FieldExt>(v: i32) -> N {
+    if v >= 0 {
+        N::from(v as u64)
+    } else {
+        N::from((-v) as u64)
     }
 }
