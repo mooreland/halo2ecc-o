@@ -7,7 +7,7 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 
 use crate::{
-    assign::{AssignedInteger, AssignedValue, MAX_LIMBS},
+    assign::{AssignedCondition, AssignedInteger, AssignedValue, MAX_LIMBS},
     chips::native_chip::NativeChipOps,
     context::IntegerContext,
     pair,
@@ -17,6 +17,8 @@ use crate::{
     },
     util::{bn_to_field, field_to_bn, get_n_from_i32, ToField},
 };
+
+use super::bit_chip::BitChipOps;
 
 impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
     pub fn info(&self) -> &RangeInfo<W, N> {
@@ -350,6 +352,81 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         Ok(assigned_rem)
     }
 
+    // Same as reduce, but res is zero
+    // TODO: review again
+    pub fn assert_int_zero(&mut self, a: &AssignedInteger<W, N>) -> Result<(), Error> {
+        let overflow_limit = self.info().overflow_limit;
+        assert!(a.times < overflow_limit as usize);
+
+        // Check a = d * w
+        let a_bn = self.get_w_bn(&a);
+        let (d, _) = (|| Some(a_bn?.div_rem(&self.info().w_modulus)))().unzip();
+
+        let zero = N::zero();
+        let one = N::one();
+
+        let d = (|| Some(bn_to_field(d.as_ref()?)))();
+        let assigned_d = self.range_region_context.assign_common_range_cell(d)?;
+        let d = d.map(|x| field_to_bn(&x));
+
+        // Constrain on native.
+        self.plonk_region_context.one_line(
+            [
+                pair!(&assigned_d, self.info().w_native),
+                pair!(&a.native, -one),
+            ]
+            .into_iter(),
+            None,
+            ([], None),
+        )?;
+
+        let mut last_v: Option<AssignedValue<N>> = None;
+        for i in 0..self.info().reduce_check_limbs as usize {
+            // check equation on ith limbs
+            let last_borrow = if i != 0 { overflow_limit } else { 0 };
+            let carry = (|| Some(field_to_bn(last_v?.value().as_ref()?)))();
+
+            let u: Option<BigUint> = (|| {
+                Some(
+                    d.as_ref()? * &self.info().w_modulus_limbs_le_bn[i]
+                        + &self.info().limb_modulus * overflow_limit
+                        - field_to_bn(&a.limbs_le[i].unwrap().value()?)
+                        + carry.unwrap_or(BigUint::from(0u64))
+                        - last_borrow,
+                )
+            })();
+
+            let (v, _) = (|| Some(u?.div_rem(&self.info().limb_modulus)))().unzip();
+
+            let v = self
+                .range_region_context
+                .assign_common_range_cell(v.map(|v| bn_to_field(&v)))?;
+
+            // constrains on limb_modulus
+            self.plonk_region_context.one_line(
+                [
+                    pair!(&assigned_d, self.info().w_modulus_limbs_le[i]),
+                    pair!(&a.limbs_le[i].unwrap(), -one),
+                    pair!(&v, -bn_to_field::<N>(&self.info().limb_modulus)),
+                    match &last_v {
+                        Some(last_v) => pair!(last_v, one),
+                        None => pair!(&zero, zero),
+                    },
+                ]
+                .into_iter(),
+                Some(bn_to_field(
+                    &(&self.info().limb_modulus * overflow_limit
+                        - if i == 0 { 0u64 } else { overflow_limit }),
+                )),
+                ([], None),
+            )?;
+
+            last_v = Some(v);
+        }
+
+        Ok(())
+    }
+
     pub fn conditionally_reduce(
         &mut self,
         a: AssignedInteger<W, N>,
@@ -490,6 +567,96 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         );
         self.conditionally_reduce(res)
     }
+
+    fn assert_int_equal(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<(), Error> {
+        let diff = self.int_sub(a, b)?;
+        self.assert_int_zero(&diff)?;
+        Ok(())
+    }
+
+    fn is_pure_zero(&mut self, a: &AssignedInteger<W, N>) -> Result<AssignedCondition<N>, Error> {
+        let one = N::one();
+
+        let sum = self.plonk_region_context.sum_with_constant_in_one_line(
+            a.limbs_le
+                .iter()
+                .filter_map(|v| v.as_ref())
+                .map(|v| (v, one)),
+            None,
+        )?;
+        self.plonk_region_context.is_zero(&sum)
+    }
+
+    fn is_pure_w_modulus(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+    ) -> Result<AssignedCondition<N>, Error> {
+        assert!(a.times == 1);
+
+        let native_diff = self
+            .plonk_region_context
+            .add_constant(&a.native, -self.info().w_native)?;
+        let mut is_eq = self.plonk_region_context.is_zero(&native_diff)?;
+
+        for i in 0..self.info().pure_w_check_limbs as usize {
+            let limb_diff = self
+                .plonk_region_context
+                .add_constant(&a.limbs_le[i].unwrap(), -self.info().w_modulus_limbs_le[i])?;
+            let is_limb_eq = self.plonk_region_context.is_zero(&limb_diff)?;
+            is_eq = self.plonk_region_context.and(&is_eq, &is_limb_eq)?;
+        }
+
+        Ok(is_eq)
+    }
+
+    fn is_int_zero(&mut self, a: &AssignedInteger<W, N>) -> Result<AssignedCondition<N>, Error> {
+        let a = self.reduce(a)?;
+        let is_zero = self.is_pure_zero(&a)?;
+        let is_w_modulus = self.is_pure_w_modulus(&a)?;
+
+        self.plonk_region_context.or(&is_zero, &is_w_modulus)
+    }
+
+    // TODO: review again, consider setup stage
+    // Find res = a * b_inv
+    // Get c = b * res.
+    // Assert c - a == 0.
+    // Return res.
+    pub fn int_div_unsafe(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<Option<AssignedInteger<W, N>>, Error> {
+        let a_bn = self.get_w_bn(&a);
+        let b_bn = self.get_w_bn(&b);
+        let b_inv: Option<Option<W>> = b_bn.as_ref().map(|b_bn| {
+            bn_to_field::<W>(&(*b_bn % &self.info().w_modulus))
+                .invert()
+                .into()
+        });
+
+        let res = (|| Some(bn_to_field::<W>(&(a_bn? % &self.info().w_modulus)) * b_inv??))();
+        let assigned_res = self.assign_w(res.map(|res| field_to_bn(&res)))?;
+
+        // To ensure b * res == a
+        let c = self.int_mul(&b, &assigned_res)?;
+        self.assert_int_equal(&c, a)?;
+
+        // To avoid 0 / 0, we need to check b != 0
+        // But to avoid reduce, we just need to check c != 0
+        let is_b_zero = self.is_int_zero(&c)?;
+        let is_not_zero = self.plonk_region_context.try_assert_false(&is_b_zero)?;
+
+        if is_not_zero {
+            Ok(Some(assigned_res))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -570,6 +737,16 @@ mod test {
         context: &mut IntegerContext<'_, Fq, Fr>,
     ) -> Result<(Fq, AssignedInteger<Fq, Fr>), Error> {
         let a = Fq::rand();
+        Ok((a, context.assign_w(Some(field_to_bn(&a)))?))
+    }
+
+    fn int_random_and_assign_non_zero(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+    ) -> Result<(Fq, AssignedInteger<Fq, Fr>), Error> {
+        let mut a = Fq::rand();
+        while a.ct_is_zero().into() {
+            a = Fq::rand();
+        }
         Ok((a, context.assign_w(Some(field_to_bn(&a)))?))
     }
 
@@ -692,6 +869,34 @@ mod test {
         Ok(())
     }
 
+    fn fill_int_div_unsafe_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        use halo2_proofs::arithmetic::Field;
+
+        if is_success {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign_non_zero(context)?;
+
+            let c = a * b.invert().unwrap();
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_div_unsafe(&assigned_a, &assigned_b)?.unwrap();
+            context.assert_int_equal(&res, &assigned_c)?;
+        } else {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign_non_zero(context)?;
+
+            let c = a * b.invert().unwrap() + Fq::one();
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_div_unsafe(&assigned_a, &assigned_b)?.unwrap();
+            context.assert_int_equal(&res, &assigned_c)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_int_chip_success() {
         run_circuit_on_bn256(
@@ -705,6 +910,7 @@ mod test {
                         fill_int_add_constant_w_test,
                         fill_int_sub_test,
                         fill_int_neg_test,
+                        fill_int_div_unsafe_test,
                     ] {
                         v(context, is_success)?;
                     }
@@ -735,6 +941,7 @@ mod test {
                 fill_int_add_constant_w_test,
                 fill_int_sub_test,
                 fill_int_neg_test,
+                fill_int_div_unsafe_test,
             ] {
                 test_fail!(v);
             }
