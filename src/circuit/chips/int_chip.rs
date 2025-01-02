@@ -13,8 +13,7 @@ use crate::{
     pair,
     range_gate::{COMPACT_BITS, COMPACT_CELLS},
     range_info::{
-        get_bn_common_range_to_field, get_bn_compact_range,
-        RangeInfo, COMMON_RANGE_BITS,
+        get_bn_common_range_to_field, get_bn_compact_range, RangeInfo, COMMON_RANGE_BITS,
     },
     util::{bn_to_field, field_to_bn, get_n_from_i32, ToField},
 };
@@ -380,12 +379,115 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let native = self.limbs_to_native(&limbs)?;
 
         let res = AssignedInteger::new_with_times(
-            limbs.try_into().unwrap(),
+            limbs,
             native,
             (|| Some(a.value.as_ref()? + b.value.as_ref()?))(),
             a.times + b.times,
         );
 
+        self.conditionally_reduce(res)
+    }
+
+    pub fn int_add_constant_w(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        let mut limbs = [None; MAX_LIMBS];
+
+        for i in 0..self.info().limbs as usize {
+            let value = self
+                .plonk_region_context
+                .add_constant(&a.limbs_le[i].unwrap(), self.info().w_modulus_limbs_le[i])?;
+            limbs[i] = Some(value)
+        }
+
+        let native = self.limbs_to_native(&limbs)?;
+
+        let res = AssignedInteger::new_with_times(
+            limbs,
+            native,
+            a.value.as_ref().map(|a| a + &self.info().w_modulus),
+            a.times + 2,
+        );
+
+        self.conditionally_reduce(res)
+    }
+
+    pub fn int_sub(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        let mut upper_limbs = [N::zero(); MAX_LIMBS];
+        upper_limbs.copy_from_slice(
+            &self.info().w_modulus_of_ceil_times[b.times as usize]
+                .as_ref()
+                .unwrap()
+                .1,
+        );
+
+        let one = N::one();
+
+        let mut limbs = [None; MAX_LIMBS];
+        for i in 0..self.info().limbs as usize {
+            let cell = self.plonk_region_context.sum_with_constant(
+                &[
+                    (&a.limbs_le[i].unwrap(), one),
+                    (&b.limbs_le[i].unwrap(), -one),
+                ],
+                Some(upper_limbs[i]),
+            )?;
+            limbs[i] = Some(cell);
+        }
+
+        let native = self.limbs_to_native(&limbs)?;
+
+        let upper_bn = &self.info().w_modulus_of_ceil_times[b.times as usize]
+            .as_ref()
+            .unwrap()
+            .0;
+        let res = AssignedInteger::new_with_times(
+            limbs,
+            native,
+            a.value
+                .as_ref()
+                .and_then(|a| Some(a + upper_bn - b.value.as_ref()?)),
+            a.times + b.times + 1,
+        );
+        self.conditionally_reduce(res)
+    }
+
+    pub fn int_neg(&mut self, a: &AssignedInteger<W, N>) -> Result<AssignedInteger<W, N>, Error> {
+        let mut upper_limbs = [N::zero(); MAX_LIMBS];
+        upper_limbs.copy_from_slice(
+            &self.info().w_modulus_of_ceil_times[a.times as usize]
+                .as_ref()
+                .unwrap()
+                .1,
+        );
+
+        let one = N::one();
+
+        let mut limbs = [None; MAX_LIMBS];
+        for i in 0..self.info().limbs as usize {
+            let cell = self
+                .plonk_region_context
+                .sum_with_constant(&[(&a.limbs_le[i].unwrap(), -one)], Some(upper_limbs[i]))?;
+            limbs[i] = Some(cell);
+        }
+
+        let native = self.limbs_to_native(&limbs)?;
+
+        let upper_bn = &self.info().w_modulus_of_ceil_times[a.times as usize]
+            .as_ref()
+            .unwrap()
+            .0;
+        let res = AssignedInteger::new_with_times(
+            limbs.try_into().unwrap(),
+            native,
+            a.value.as_ref().map(|a| upper_bn - a),
+            a.times + 1,
+        );
         self.conditionally_reduce(res)
     }
 }
@@ -521,6 +623,75 @@ mod test {
         Ok(())
     }
 
+    fn fill_int_sub_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign(context)?;
+            let c = a - b;
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_sub(&assigned_a, &assigned_b)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_c)?;
+        } else {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign(context)?;
+            let c = a - b + Fq::one();
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_sub(&assigned_a, &assigned_b)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_c)?;
+        }
+        Ok(())
+    }
+
+    fn fill_int_neg_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let c = -a;
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_neg(&assigned_a)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_c)?;
+        } else {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let c = Fq::one() - a;
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_neg(&assigned_a)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_c)?;
+        }
+        Ok(())
+    }
+
+    fn fill_int_add_constant_w_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let (_, assigned_a) = int_random_and_assign(context)?;
+
+            let res = context.int_add_constant_w(&assigned_a)?;
+            let res = context.reduce(&res)?;
+            context.assert_int_exact_equal(&res, &assigned_a)?;
+        } else {
+            let (_, assigned_a) = int_random_and_assign(context)?;
+
+            let res = context.int_add_constant_w(&assigned_a)?;
+            context.assert_int_exact_equal(&res, &assigned_a)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_int_chip_success() {
         run_circuit_on_bn256(
@@ -528,7 +699,13 @@ mod test {
                 fill: |context| {
                     let is_success = true;
 
-                    for v in [fill_int_mul_test, fill_int_add_test] {
+                    for v in [
+                        fill_int_mul_test,
+                        fill_int_add_test,
+                        fill_int_add_constant_w_test,
+                        fill_int_sub_test,
+                        fill_int_neg_test,
+                    ] {
                         v(context, is_success)?;
                     }
 
@@ -551,9 +728,14 @@ mod test {
                 );
             };
         }
-        //for _ in 0..100 {
-        {
-            for v in [fill_int_mul_test, fill_int_add_test] {
+        for _ in 0..10 {
+            for v in [
+                fill_int_mul_test,
+                fill_int_add_test,
+                fill_int_add_constant_w_test,
+                fill_int_sub_test,
+                fill_int_neg_test,
+            ] {
                 test_fail!(v);
             }
         }

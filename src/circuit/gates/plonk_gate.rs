@@ -46,7 +46,7 @@ impl<N: FieldExt> PlonkGate<N> {
 
         var.iter().for_each(|c| meta.enable_equality(c.clone()));
 
-        meta.create_gate("var_gate", |meta| {
+        meta.create_gate("plonk_gate", |meta| {
             let _constant = meta.query_fixed(constant, Rotation::cur());
             let _next = meta.query_advice(var[VAR_COLUMNS - 1], Rotation::next());
             let _next_coeff = meta.query_fixed(next_coeff, Rotation::cur());

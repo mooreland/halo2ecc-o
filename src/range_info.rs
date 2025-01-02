@@ -66,7 +66,7 @@ pub struct RangeInfo<W: BaseExt, N: FieldExt> {
     pub pure_w_check_limbs: u64,
     pub reduce_check_limbs: u64,
     pub mul_check_limbs: u64,
-    pub w_modulus_of_ceil_times: Vec<Option<Vec<N>>>,
+    pub w_modulus_of_ceil_times: Vec<Option<(BigUint, Vec<N>)>>,
 
     pub _phantom: PhantomData<W>,
 }
@@ -351,7 +351,7 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
             .unwrap()
     }
 
-    pub fn find_w_modulus_of_ceil_times(&self, times: u64) -> Vec<N> {
+    pub fn find_w_modulus_of_ceil_times(&self, times: u64) -> (BigUint, Vec<N>) {
         let max = &self.w_ceil * times;
         let (n, rem) = max.div_rem(&self.w_modulus);
         let n = if rem.gt(&BigUint::from(0u64)) {
@@ -361,6 +361,7 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
         };
 
         let mut upper = &self.w_modulus * n;
+        let upper_bn = upper.clone();
 
         let mut limbs = vec![];
         for _ in 0..self.limbs - 1 {
@@ -375,7 +376,7 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
         assert!(upper < (BigUint::from(1u64) << (self.w_ceil_bits % self.limb_bits)) * (times + 1));
 
         limbs.push(bn_to_field::<N>(&upper));
-        limbs.try_into().unwrap()
+        (upper_bn, limbs.try_into().unwrap())
     }
 }
 
