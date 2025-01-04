@@ -1126,7 +1126,7 @@ mod test {
     }
 
     #[test]
-    fn test_int_chip_fail() {
+    fn test_int_chip_fail1() {
         macro_rules! test_fail {
             ($f: expr) => {
                 run_circuit_on_bn256_expect_fail(
@@ -1144,6 +1144,26 @@ mod test {
                 fill_int_add_constant_w_test,
                 fill_int_sub_test,
                 fill_int_neg_test,
+            ] {
+                test_fail!(v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_int_chip_fail2() {
+        macro_rules! test_fail {
+            ($f: expr) => {
+                run_circuit_on_bn256_expect_fail(
+                    TestCircuit {
+                        fill: |context| $f(context, false),
+                    },
+                    19,
+                );
+            };
+        }
+        for _ in 0..10 {
+            for v in [
                 fill_int_div_unsafe_test,
                 fill_int_div_test,
                 fill_bisec_int_test,
