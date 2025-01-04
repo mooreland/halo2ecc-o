@@ -716,6 +716,86 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
         Ok((is_b_zero, c))
     }
+
+    pub fn int_square(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        self.int_mul(a, a)
+    }
+
+    pub fn int_mul_small_constant(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: u64,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        let threshold = 1 << (self.info().overflow_bits - 2);
+        assert!(b < threshold);
+
+        let a_opt = if a.times as u64 * b >= self.info().overflow_limit {
+            Some(self.reduce(a)?)
+        } else {
+            None
+        };
+
+        let a = if let Some(reduced_a) = &a_opt {
+            reduced_a
+        } else {
+            a
+        };
+
+        let mut limbs = [None; MAX_LIMBS];
+        for i in 0..self.info().limbs as usize {
+            let cell = self
+                .plonk_region_context
+                .sum_with_constant(&[(&a.limbs_le[i].unwrap(), N::from(b as u64))], None)?;
+            limbs[i] = Some(cell);
+        }
+
+        let native = self.limbs_to_native(&limbs)?;
+
+        let res = AssignedInteger::new_with_times(
+            limbs.try_into().unwrap(),
+            native,
+            a.value.clone().map(|v| v * b),
+            a.times * b as usize,
+        );
+
+        self.conditionally_reduce(res)
+    }
+
+    pub fn bisec_int(
+        &mut self,
+        cond: &AssignedCondition<N>,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        let mut limbs = [None; MAX_LIMBS];
+        for i in 0..self.info().limbs as usize {
+            let cell = self.plonk_region_context.bisec(
+                cond,
+                &a.limbs_le[i].unwrap(),
+                &b.limbs_le[i].unwrap(),
+            )?;
+            limbs[i] = Some(cell);
+        }
+        let native = self
+            .plonk_region_context
+            .bisec(cond, &a.native, &b.native)?;
+
+        Ok(AssignedInteger::new_with_times(
+            limbs,
+            native,
+            (|| {
+                Some(if !cond.value()?.is_zero_vartime() {
+                    a.value.clone()?
+                } else {
+                    b.value.clone()?
+                })
+            })(),
+            a.times.max(b.times),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -986,6 +1066,38 @@ mod test {
         Ok(())
     }
 
+    fn fill_bisec_int_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let (_, assigned_a) = int_random_and_assign(context)?;
+            let (_, assigned_b) = int_random_and_assign(context)?;
+
+            let one = context.plonk_region_context.assign_bit(Fr::one())?;
+            let zero = context.plonk_region_context.assign_bit(Fr::zero())?;
+
+            let res = context.bisec_int(&one, &assigned_a, &assigned_b)?;
+            context.assert_int_equal(&assigned_a, &res)?;
+
+            let res = context.bisec_int(&zero, &assigned_a, &assigned_b)?;
+            context.assert_int_equal(&assigned_b, &res)?;
+        } else {
+            let (_, assigned_a) = int_random_and_assign(context)?;
+            let (_, assigned_b) = int_random_and_assign(context)?;
+
+            let one = context.plonk_region_context.assign_bit(Fr::one())?;
+            let zero = context.plonk_region_context.assign_bit(Fr::zero())?;
+
+            let res = context.bisec_int(&one, &assigned_a, &assigned_b)?;
+            context.assert_int_equal(&assigned_b, &res)?;
+
+            let res = context.bisec_int(&zero, &assigned_a, &assigned_b)?;
+            context.assert_int_equal(&assigned_a, &res)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_int_chip_success() {
         run_circuit_on_bn256(
@@ -1001,6 +1113,7 @@ mod test {
                         fill_int_neg_test,
                         fill_int_div_unsafe_test,
                         fill_int_div_test,
+                        fill_bisec_int_test,
                     ] {
                         v(context, is_success)?;
                     }
@@ -1033,6 +1146,7 @@ mod test {
                 fill_int_neg_test,
                 fill_int_div_unsafe_test,
                 fill_int_div_test,
+                fill_bisec_int_test,
             ] {
                 test_fail!(v);
             }
