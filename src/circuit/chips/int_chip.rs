@@ -657,6 +657,65 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             Ok(None)
         }
     }
+
+    pub fn int_div(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<(AssignedCondition<N>, AssignedInteger<W, N>), Error> {
+        // If b != 0
+        // Find (c, d) that b * c = d * w + reduced_a,
+        // Call reduce on `a` because if b = 1, we cannot find such (c, d), c < w_ceil and d >= 0
+
+        // If b == 0
+        // Find (c, d) that b * c = d * w + reduced_a * 0,
+
+        let a = self.reduce(a)?;
+        let b = self.reduce(b)?;
+        let is_b_zero = self.is_int_zero(&b)?;
+        let a_coeff = self.plonk_region_context.not(&is_b_zero)?;
+
+        let a = {
+            let mut limbs_le = [None; MAX_LIMBS];
+            for i in 0..self.info().limbs as usize {
+                let cell = self
+                    .plonk_region_context
+                    .mul(&a.limbs_le[i].unwrap(), a_coeff.as_ref())?;
+                limbs_le[i] = Some(cell);
+            }
+            let native = self.plonk_region_context.mul(&a.native, a_coeff.as_ref())?;
+            let value = (|| {
+                Some(if is_b_zero.value()?.is_zero_vartime() {
+                    a.value?
+                } else {
+                    BigUint::from(0u64)
+                })
+            })();
+            AssignedInteger::<W, N>::new_with_times(limbs_le, native, value, a.times)
+        };
+
+        let a_bn = self.get_w_bn(&a);
+        let b_bn = self.get_w_bn(&b);
+        let c = (|| {
+            let a_bn = a_bn?;
+            Some(
+                bn_to_field::<W>(b_bn.as_ref()?)
+                    .invert()
+                    .map(|b| bn_to_field::<W>(a_bn) * b)
+                    .unwrap_or(W::zero()),
+            )
+        })();
+        let c_bn = c.as_ref().map(|c| field_to_bn(c));
+        let d_bn = (|| Some((b_bn? * c_bn.as_ref()? - a_bn?) / &self.info().w_modulus))();
+
+        let c = self.assign_w(c_bn)?;
+        let d = self.assign_d(d_bn)?;
+
+        self.add_constraints_for_mul_equation_on_limbs(&b, &c, d.0, &a);
+        self.add_constraints_for_mul_equation_on_native(&b, &c, &d.1, &a)?;
+
+        Ok((is_b_zero, c))
+    }
 }
 
 #[cfg(test)]
@@ -897,6 +956,36 @@ mod test {
         Ok(())
     }
 
+    fn fill_int_div_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        use halo2_proofs::arithmetic::Field;
+
+        if is_success {
+            let (a, assigned_a) = int_random_and_assign(context)?;
+            let (b, assigned_b) = int_random_and_assign_non_zero(context)?;
+
+            let c = a * b.invert().unwrap();
+            let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
+
+            let res = context.int_div(&assigned_a, &assigned_b)?;
+            context.assert_int_equal(&res.1, &assigned_c)?;
+            context.plonk_region_context.assert_false(&res.0)?;
+
+            let assigned_zero = context.assign_w(Some(BigUint::from(0u64)))?;
+            let res = context.int_div(&assigned_a, &assigned_zero)?;
+            context.plonk_region_context.assert_true(&res.0)?;
+        } else {
+            //TESTTODO: add more case
+            let (_, assigned_a) = int_random_and_assign(context)?;
+            let assigned_zero = context.assign_w(Some(BigUint::from(0u64)))?;
+            let res = context.int_div(&assigned_a, &assigned_zero)?;
+            context.plonk_region_context.assert_false(&res.0)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_int_chip_success() {
         run_circuit_on_bn256(
@@ -911,6 +1000,7 @@ mod test {
                         fill_int_sub_test,
                         fill_int_neg_test,
                         fill_int_div_unsafe_test,
+                        fill_int_div_test,
                     ] {
                         v(context, is_success)?;
                     }
@@ -942,6 +1032,7 @@ mod test {
                 fill_int_sub_test,
                 fill_int_neg_test,
                 fill_int_div_unsafe_test,
+                fill_int_div_test,
             ] {
                 test_fail!(v);
             }
