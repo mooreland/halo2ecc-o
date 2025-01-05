@@ -17,7 +17,7 @@ use crate::range_info::*;
 use crate::util::*;
 
 const BITS: usize = COMMON_RANGE_BITS as usize; // value is 18
-const ADV_COLUMNS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
+const ADV_COLUMNS: usize = 3;
 
 pub(crate) const COMPACT_CELLS: usize = RANGE_VALUE_DECOMPOSE as usize; // value is 6
 pub(crate) const COMPACT_BITS: usize = BITS * COMPACT_CELLS; // value is 108
@@ -81,12 +81,13 @@ impl<N: FieldExt> RangeGate<N> {
             let sel = meta.query_fixed(compact_sel, Rotation::cur());
             let compact = meta.query_advice(compact, Rotation::cur());
 
-            assert!(ADV_COLUMNS >= COMPACT_CELLS);
             let mut compact_value = compact;
             for i in 0..COMPACT_CELLS {
                 compact_value = compact_value
-                    - meta.query_advice(var_cols[i], Rotation::cur())
-                        * Expression::Constant((BigUint::from(1u64) << (i * BITS)).to_field());
+                    - meta.query_advice(
+                        var_cols[i % ADV_COLUMNS],
+                        Rotation((i / ADV_COLUMNS) as i32),
+                    ) * Expression::Constant((BigUint::from(1u64) << (i * BITS)).to_field());
             }
 
             vec![sel * compact_value]
@@ -216,7 +217,7 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
             self.compact_rows.push(self.offset);
         }
 
-        self.offset += 1;
+        self.offset += (COMPACT_CELLS + ADV_COLUMNS - 1) / ADV_COLUMNS;
 
         Ok(AssignedValue {
             value,
@@ -231,8 +232,8 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
             for i in 0..COMPACT_CELLS {
                 self.region.assign_advice(
                     || "assign_compact_cell",
-                    self.range_gate_config.var_cols[i],
-                    *offset,
+                    self.range_gate_config.var_cols[i % ADV_COLUMNS],
+                    *offset + i / ADV_COLUMNS,
                     || {
                         let v = (&value_bn & BigUint::from((1u64 << BITS) - 1)).to_field();
                         value_bn >>= BITS as u32;
@@ -320,7 +321,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature="profile")]
+    #[cfg(feature = "profile")]
     fn bench_range_gate() {
         bench_circuit_on_bn256(
             RangeTestCircuit {
