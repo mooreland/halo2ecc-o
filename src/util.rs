@@ -1,4 +1,7 @@
-use halo2_proofs::{arithmetic::{BaseExt, FieldExt}, pairing::bn256::Fr};
+use halo2_proofs::{
+    arithmetic::{BaseExt, FieldExt},
+    pairing::bn256::Fr,
+};
 use num_bigint::BigUint;
 use num_traits::Num;
 
@@ -67,6 +70,12 @@ pub(crate) mod test {
 
     #[cfg(feature = "profile")]
     pub(crate) fn bench_circuit_on_bn256<C: Circuit<Fr>>(circuit: C, k: u32) {
+        use halo2_proofs::pairing::bn256::Bn256;
+        use halo2_proofs::pairing::bn256::G1Affine;
+        use halo2_proofs::plonk::*;
+        use halo2_proofs::poly::commitment::Params;
+        use halo2_proofs::poly::commitment::ParamsVerifier;
+        use halo2_proofs::transcript::*;
         use std::sync::Arc;
         use zkwasm_prover::{create_proof_from_advices_with_shplonk, prepare_advice_buffer};
 

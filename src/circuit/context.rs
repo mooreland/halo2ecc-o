@@ -47,6 +47,7 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct IntegerContext<'a, W: BaseExt, N: FieldExt> {
     pub(crate) plonk_region_context: PlonkRegionContext<'a, N>,
     pub(crate) range_region_context: RangeRegionContext<'a, N>,
@@ -77,8 +78,9 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct NativeEccContext<'a, C: CurveAffine> {
-    pub(crate) msm_index: usize,
+    pub(crate) msm_index: u64,
     pub(crate) integer_context: IntegerContext<'a, C::Base, C::Scalar>,
 }
 
@@ -115,6 +117,7 @@ impl<'a, W: BaseExt, N: FieldExt> Drop for IntegerContext<'a, W, N> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct RangeRegionContext<'a, N: FieldExt> {
     pub(crate) region: &'a Region<'a, N>,
     pub(crate) range_gate_config: &'a RangeGateConfig,

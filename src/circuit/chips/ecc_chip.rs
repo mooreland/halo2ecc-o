@@ -30,7 +30,7 @@ impl From<Error> for EccUnsafeError {
     }
 }
 
-impl<'b, C: CurveAffine> EccBaseOps<'b, C, C::Scalar> for NativeEccContext<'b, C> {
+impl<'b, C: CurveAffine> EccChipBaseOps<'b, C, C::Scalar> for NativeEccContext<'b, C> {
     fn integer_context<'a>(
         &'a mut self,
     ) -> &'a mut IntegerContext<'b, <C as CurveAffine>::Base, C::Scalar> {
@@ -42,7 +42,7 @@ impl<'b, C: CurveAffine> EccBaseOps<'b, C, C::Scalar> for NativeEccContext<'b, C
     }
 }
 
-pub trait EccBaseOps<'b, C: CurveAffine, N: FieldExt> {
+pub trait EccChipBaseOps<'b, C: CurveAffine, N: FieldExt> {
     fn integer_context<'a>(&'a mut self) -> &'a mut IntegerContext<'b, C::Base, N>;
     fn plonk_region_context<'a>(&'a mut self) -> &'a mut PlonkRegionContext<'b, N>;
 
@@ -75,9 +75,9 @@ pub trait EccBaseOps<'b, C: CurveAffine, N: FieldExt> {
         // For identity, assign (x, y) as generator to pass y^2 = x^3 + b, it is safe because of z bit.
         let coordinates = (|| {
             Some(if c?.is_identity().into() {
-                c?.coordinates().unwrap()
-            } else {
                 C::generator().coordinates().unwrap()
+            } else {
+                c?.coordinates().unwrap()
             })
         })();
         let (x, y) = coordinates
@@ -104,9 +104,9 @@ pub trait EccBaseOps<'b, C: CurveAffine, N: FieldExt> {
         // For identity, assign (x, y) as generator to pass y^2 = x^3 + b, it is safe because of z bit.
         let coordinates = (|| {
             Some(if c?.is_identity().into() {
-                c?.coordinates().unwrap()
-            } else {
                 unreachable!()
+            } else {
+                c?.coordinates().unwrap()
             })
         })();
         let (x, y) = coordinates
