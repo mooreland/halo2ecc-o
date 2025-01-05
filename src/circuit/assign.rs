@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::arithmetic::{BaseExt, FieldExt};
+use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
 use halo2_proofs::circuit::Cell;
 use num_bigint::BigUint;
 
@@ -101,6 +101,20 @@ impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct AssignedPoint<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedInteger<C::Base, N>,
+    pub y: AssignedInteger<C::Base, N>,
+    pub z: AssignedCondition<N>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AssignedNonZeroPoint<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedInteger<C::Base, N>,
+    pub y: AssignedInteger<C::Base, N>,
+}
+
 
 pub trait MayAssignedValue<N: FieldExt> {
     fn value(&self) -> Option<N>;

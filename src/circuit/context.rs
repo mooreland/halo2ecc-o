@@ -7,6 +7,7 @@ use crate::range_info::RangeInfo;
 
 use super::assign::{AssignedInteger, AssignedValue, MAX_LIMBS};
 use super::int_mul_gate::IntMulGateConfig;
+use super::kvmap_gate::KVMapGateConfig;
 use super::plonk_gate::PlonkGateConfig;
 use super::range_gate::RangeGateConfig;
 
@@ -14,6 +15,7 @@ use super::range_gate::RangeGateConfig;
 pub struct PlonkRegionContext<'a, N: FieldExt> {
     pub(crate) region: &'a Region<'a, N>,
     pub(crate) plonk_gate_config: &'a PlonkGateConfig,
+    pub(crate) kvmap_gate_config: Option<&'a KVMapGateConfig>,
     pub offset: usize,
 }
 
@@ -22,6 +24,20 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
         Self {
             region,
             plonk_gate_config,
+            kvmap_gate_config: None,
+            offset: 0,
+        }
+    }
+
+    pub fn new_with_kvmap(
+        region: &'a Region<'a, N>,
+        plonk_gate_config: &'a PlonkGateConfig,
+        kvmap_gate_config: &'a KVMapGateConfig,
+    ) -> Self {
+        Self {
+            region,
+            plonk_gate_config,
+            kvmap_gate_config: Some(kvmap_gate_config),
             offset: 0,
         }
     }

@@ -1,6 +1,7 @@
 pub mod native_chip;
 pub mod bit_chip;
 pub mod int_chip;
+pub mod ecc_chip;
 
 #[macro_export]
 macro_rules! pair {

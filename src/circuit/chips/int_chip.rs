@@ -10,6 +10,7 @@ use crate::{
     assign::{AssignedCondition, AssignedInteger, AssignedValue, MAX_LIMBS},
     chips::native_chip::NativeChipOps,
     context::IntegerContext,
+    kvmap_gate::KVMapOps,
     pair,
     range_gate::{COMPACT_BITS, COMPACT_CELLS},
     range_info::{
@@ -796,6 +797,63 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             a.times.max(b.times),
         ))
     }
+
+    pub fn kvmap_set_int(
+        &mut self,
+        gid: u64,
+        k: &AssignedValue<N>,
+        v: &AssignedInteger<W, N>,
+    ) -> Result<(), Error> {
+        assert!(v.times == 1);
+
+        let gid = gid * (self.info().limbs + 1);
+
+        for i in 0..self.info().limbs as usize {
+            self.plonk_region_context.kvmap_set(
+                gid + i as u64,
+                k,
+                v.limbs_le[i].as_ref().unwrap(),
+            )?;
+        }
+
+        self.plonk_region_context
+            .kvmap_set(gid + self.info().limbs, k, &v.native)?;
+
+        Ok(())
+    }
+
+    pub fn kvmap_get_int(
+        &mut self,
+        gid: u64,
+        k: &AssignedValue<N>,
+        candidate_v: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, Error> {
+        assert!(candidate_v.times == 1);
+
+        let gid = gid * (self.info().limbs + 1);
+
+        let mut limbs_le = [None; MAX_LIMBS];
+        for i in 0..self.info().limbs as usize {
+            let v = self.plonk_region_context.kvmap_get(
+                gid + i as u64,
+                k,
+                candidate_v.limbs_le[i].unwrap().value(),
+            )?;
+            limbs_le[i] = Some(v);
+        }
+
+        let native = self.plonk_region_context.kvmap_get(
+            gid + self.info().limbs,
+            k,
+            candidate_v.native.value(),
+        )?;
+
+        Ok(AssignedInteger::new(
+            limbs_le,
+            native,
+            candidate_v.value.clone(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -807,6 +865,8 @@ mod test {
     use crate::context::RangeRegionContext;
     use crate::int_mul_gate::IntMulGate;
     use crate::int_mul_gate::IntMulGateConfig;
+    use crate::kvmap_gate::KVMapGate;
+    use crate::kvmap_gate::KVMapGateConfig;
     use crate::plonk_gate::*;
     use crate::range_gate::RangeGate;
     use crate::range_gate::RangeGateConfig;
@@ -826,7 +886,12 @@ mod test {
     impl<F: Clone + Fn(&mut IntegerContext<'_, Fq, Fr>) -> Result<(), Error>> Circuit<Fr>
         for TestCircuit<F>
     {
-        type Config = (PlonkGateConfig, RangeGateConfig, IntMulGateConfig);
+        type Config = (
+            PlonkGateConfig,
+            RangeGateConfig,
+            IntMulGateConfig,
+            KVMapGateConfig,
+        );
         type FloorPlanner = V1;
 
         fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
@@ -834,7 +899,14 @@ mod test {
             let range_gate_config = RangeGate::configure(meta);
             let int_mul_gate_config =
                 IntMulGate::configure(meta, plonk_gate_config.var, &RangeInfo::<Fq, Fr>::new());
-            (plonk_gate_config, range_gate_config, int_mul_gate_config)
+            let kvmap_gate_config =
+                KVMapGate::configure(meta, plonk_gate_config.var[0..2].try_into().unwrap());
+            (
+                plonk_gate_config,
+                range_gate_config,
+                int_mul_gate_config,
+                kvmap_gate_config,
+            )
         }
 
         fn without_witnesses(&self) -> Self {
@@ -850,7 +922,8 @@ mod test {
             layouter.assign_region(
                 || "test",
                 |region| {
-                    let plonk_region_context = PlonkRegionContext::new(&region, &config.0);
+                    let plonk_region_context =
+                        PlonkRegionContext::new_with_kvmap(&region, &config.0, &config.3);
                     let range_region_context = RangeRegionContext::new(&region, &config.1);
                     let mut int_context = IntegerContext::new(
                         plonk_region_context,
@@ -1098,6 +1171,41 @@ mod test {
         Ok(())
     }
 
+    fn fill_kvmap_int_test(
+        context: &mut IntegerContext<'_, Fq, Fr>,
+        is_success: bool,
+    ) -> Result<(), Error> {
+        if is_success {
+            let (_, assigned_a) = int_random_and_assign(context)?;
+            let (_, assigned_b) = int_random_and_assign(context)?;
+
+            let two = context.plonk_region_context.assign(Fr::one() + Fr::one())?;
+            let zero = context.plonk_region_context.assign(Fr::zero())?;
+
+            context.kvmap_set_int(1, &zero, &assigned_a)?;
+            context.kvmap_set_int(1, &two, &assigned_b)?;
+
+            let res = context.kvmap_get_int(1, &zero, &assigned_a)?;
+            context.assert_int_equal(&assigned_a, &res)?;
+
+            let res = context.kvmap_get_int(1, &two, &assigned_b)?;
+            context.assert_int_equal(&assigned_b, &res)?;
+        } else {
+            let (_, assigned_a) = int_random_and_assign(context)?;
+            let (_, assigned_b) = int_random_and_assign(context)?;
+
+            let two = context.plonk_region_context.assign(Fr::one() + Fr::one())?;
+            let zero = context.plonk_region_context.assign(Fr::zero())?;
+
+            context.kvmap_set_int(1, &zero, &assigned_a)?;
+            context.kvmap_set_int(1, &two, &assigned_b)?;
+
+            let _ = context.kvmap_get_int(1, &zero, &assigned_b)?;
+            let _ = context.kvmap_get_int(1, &two, &assigned_a)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_int_chip_success() {
         run_circuit_on_bn256(
@@ -1114,6 +1222,7 @@ mod test {
                         fill_int_div_unsafe_test,
                         fill_int_div_test,
                         fill_bisec_int_test,
+                        fill_kvmap_int_test,
                     ] {
                         v(context, is_success)?;
                     }
@@ -1167,6 +1276,7 @@ mod test {
                 fill_int_div_unsafe_test,
                 fill_int_div_test,
                 fill_bisec_int_test,
+                fill_kvmap_int_test,
             ] {
                 test_fail!(v);
             }
