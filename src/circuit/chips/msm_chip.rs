@@ -455,7 +455,7 @@ mod test {
     use crate::range_info::RangeInfo;
     use crate::util::test::*;
     use ark_std::{end_timer, start_timer};
-    use floor_planner::V1;
+    use floor_planner::FlatFloorPlanner;
     use halo2_proofs::arithmetic::BaseExt;
     use halo2_proofs::circuit::*;
     use halo2_proofs::pairing::bn256::G1Affine;
@@ -478,7 +478,7 @@ mod test {
             IntMulGateConfig,
             KVMapGateConfig,
         );
-        type FloorPlanner = V1;
+        type FloorPlanner = FlatFloorPlanner;
 
         fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
             let plonk_gate_config = PlonkGate::<Fr>::configure(meta);
