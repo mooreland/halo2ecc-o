@@ -21,6 +21,18 @@ use crate::{
 
 use super::bit_chip::BitChipOps;
 
+#[derive(Debug)]
+pub enum IntUnsafeError {
+    DivZero,
+    PlonkError(Error),
+}
+
+impl From<Error> for IntUnsafeError {
+    fn from(value: Error) -> Self {
+        IntUnsafeError::PlonkError(value)
+    }
+}
+
 impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
     pub fn info(&self) -> &RangeInfo<W, N> {
         &self.info
@@ -569,7 +581,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         self.conditionally_reduce(res)
     }
 
-    fn assert_int_equal(
+    pub fn assert_int_equal(
         &mut self,
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
@@ -614,7 +626,10 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         Ok(is_eq)
     }
 
-    fn is_int_zero(&mut self, a: &AssignedInteger<W, N>) -> Result<AssignedCondition<N>, Error> {
+    pub fn is_int_zero(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+    ) -> Result<AssignedCondition<N>, Error> {
         let a = self.reduce(a)?;
         let is_zero = self.is_pure_zero(&a)?;
         let is_w_modulus = self.is_pure_w_modulus(&a)?;
@@ -622,16 +637,25 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         self.plonk_region_context.or(&is_zero, &is_w_modulus)
     }
 
+    pub fn is_int_equal(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Result<AssignedCondition<N>, Error> {
+        let diff = self.int_sub(a, b)?;
+        self.is_int_zero(&diff)
+    }
+
     // TODO: review again, consider setup stage
     // Find res = a * b_inv
     // Get c = b * res.
     // Assert c - a == 0.
-    // Return res.
+    // Return (res, succeed)
     pub fn int_div_unsafe(
         &mut self,
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
-    ) -> Result<Option<AssignedInteger<W, N>>, Error> {
+    ) -> Result<AssignedInteger<W, N>, IntUnsafeError> {
         let a_bn = self.get_w_bn(&a);
         let b_bn = self.get_w_bn(&b);
         let b_inv: Option<Option<W>> = b_bn.as_ref().map(|b_bn| {
@@ -653,9 +677,9 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let is_not_zero = self.plonk_region_context.try_assert_false(&is_b_zero)?;
 
         if is_not_zero {
-            Ok(Some(assigned_res))
+            Ok(assigned_res)
         } else {
-            Ok(None)
+            Err(IntUnsafeError::DivZero)
         }
     }
 
@@ -1094,7 +1118,7 @@ mod test {
             let c = a * b.invert().unwrap();
             let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
 
-            let res = context.int_div_unsafe(&assigned_a, &assigned_b)?.unwrap();
+            let res = context.int_div_unsafe(&assigned_a, &assigned_b).unwrap();
             context.assert_int_equal(&res, &assigned_c)?;
         } else {
             let (a, assigned_a) = int_random_and_assign(context)?;
@@ -1103,7 +1127,7 @@ mod test {
             let c = a * b.invert().unwrap() + Fq::one();
             let assigned_c = context.assign_w(Some(field_to_bn(&c)))?;
 
-            let res = context.int_div_unsafe(&assigned_a, &assigned_b)?.unwrap();
+            let res = context.int_div_unsafe(&assigned_a, &assigned_b).unwrap();
             context.assert_int_equal(&res, &assigned_c)?;
         }
         Ok(())

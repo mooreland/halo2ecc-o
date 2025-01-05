@@ -109,12 +109,33 @@ pub struct AssignedPoint<C: CurveAffine, N: FieldExt> {
     pub z: AssignedCondition<N>,
 }
 
+impl<C: CurveAffine, N: FieldExt> AssignedPoint<C, N> {
+    pub fn new(
+        x: AssignedInteger<C::Base, N>,
+        y: AssignedInteger<C::Base, N>,
+        z: AssignedCondition<N>,
+    ) -> Self {
+        Self { x, y, z }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AssignedNonZeroPoint<C: CurveAffine, N: FieldExt> {
     pub x: AssignedInteger<C::Base, N>,
     pub y: AssignedInteger<C::Base, N>,
 }
 
+impl<C: CurveAffine, N: FieldExt> AssignedNonZeroPoint<C, N> {
+    pub fn new(x: AssignedInteger<C::Base, N>, y: AssignedInteger<C::Base, N>) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AssignedCurvature<C: CurveAffine, N: FieldExt>(
+    pub AssignedInteger<C::Base, N>,
+    pub AssignedCondition<N>,
+);
 
 pub trait MayAssignedValue<N: FieldExt> {
     fn value(&self) -> Option<N>;

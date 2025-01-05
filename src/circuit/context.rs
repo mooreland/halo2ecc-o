@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use halo2_proofs::arithmetic::{BaseExt, FieldExt};
+use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
 use halo2_proofs::circuit::Region;
 
 use crate::range_info::RangeInfo;
@@ -74,6 +74,38 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             info,
             int_mul_queue: vec![],
         }
+    }
+}
+
+pub struct NativeEccContext<'a, C: CurveAffine> {
+    pub(crate) msm_index: usize,
+    pub(crate) integer_context: IntegerContext<'a, C::Base, C::Scalar>,
+}
+
+impl<'a, C: CurveAffine> NativeEccContext<'a, C> {
+    pub fn new(
+        plonk_region_context: PlonkRegionContext<'a, C::Scalar>,
+        range_region_context: RangeRegionContext<'a, C::Scalar>,
+        int_mul_config: &'a IntMulGateConfig,
+        info: Arc<RangeInfo<C::Base, C::Scalar>>,
+    ) -> Self {
+        Self {
+            msm_index: 0,
+            integer_context: IntegerContext::new(
+                plonk_region_context,
+                range_region_context,
+                int_mul_config,
+                info,
+            ),
+        }
+    }
+
+    pub fn get_plonk_region_context(&mut self) -> &mut PlonkRegionContext<'a, C::Scalar> {
+        &mut self.integer_context.plonk_region_context
+    }
+
+    pub fn get_range_region_context(&mut self) -> &mut RangeRegionContext<'a, C::Scalar> {
+        &mut self.integer_context.range_region_context
     }
 }
 
