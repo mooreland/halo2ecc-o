@@ -14,6 +14,7 @@ use crate::assign::*;
 use crate::chips::ecc_chip::EccChipBaseOps;
 use crate::chips::native_chip::NativeChipOps;
 use crate::context::NativeEccContext;
+use crate::context::RangeRegionContext;
 use crate::pair;
 use crate::util::*;
 
@@ -68,20 +69,21 @@ impl<'b, C: CurveAffine> ParallelClone for NativeEccContext<'b, C> {
     }
 
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
-        let mut new_context = self.clone();
+        let mut new_context = NativeEccContext::new(
+            self.integer_context.plonk_region_context.clone(),
+            RangeRegionContext::new(
+                self.integer_context.range_region_context.region,
+                self.integer_context.range_region_context.range_gate_config,
+            ),
+            &self.integer_context.int_mul_config,
+            self.integer_context.info.clone(),
+        );
 
-        new_context.get_plonk_region_context().offset += offset_diff.plonk_region_offset;
-        new_context.get_range_region_context().offset += offset_diff.range_region_offset;
-        new_context.get_range_region_context().compact_rows.clear();
-        new_context
-            .get_range_region_context()
-            .compact_values
-            .clear();
-        new_context
-            .get_range_region_context()
-            .free_common_cells
-            .clear();
-        new_context.integer_context.int_mul_queue.clear();
+        new_context.get_plonk_region_context().offset =
+            self.integer_context.plonk_region_context.offset + offset_diff.plonk_region_offset;
+        new_context.get_range_region_context().offset =
+            self.integer_context.range_region_context.offset + offset_diff.range_region_offset;
+        new_context.msm_index = self.msm_index;
 
         new_context
     }
