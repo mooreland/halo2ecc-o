@@ -1,3 +1,5 @@
+use ark_std::end_timer;
+use ark_std::start_timer;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::arithmetic::Field;
@@ -43,6 +45,11 @@ impl Offset {
             plonk_region_offset: self.plonk_region_offset * n,
             range_region_offset: self.range_region_offset * n,
         }
+    }
+
+    fn less_or_equal(&self, rhs: &Offset) -> bool {
+        self.plonk_region_offset <= rhs.plonk_region_offset
+            && self.range_region_offset <= rhs.range_region_offset
     }
 }
 
@@ -213,7 +220,7 @@ impl<'b, C: CurveAffine> EccChipMSMOps<'b, C, C::Scalar> for NativeEccContext<'b
 pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
     EccChipBaseOps<'a, C, N> + ParallelClone + Send + Sized
 {
-    type AssignedScalar: Clone;
+    type AssignedScalar: Clone + Sync;
 
     fn get_and_increase_msm_prefix(&mut self) -> u64;
 
@@ -221,6 +228,50 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
         &mut self,
         s: &Self::AssignedScalar,
     ) -> Result<Vec<[AssignedCondition<N>; WINDOW_SIZE]>, Error>;
+
+    fn do_parallel<T: Send, F: Sync + Fn(&mut Self, usize) -> Result<T, EccUnsafeError>>(
+        &mut self,
+        f: F,
+        len: usize,
+    ) -> Result<Vec<T>, EccUnsafeError> {
+        let mut res = vec![];
+
+        let offset_diff = {
+            let mut predict_ops = self.clone_without_offset();
+            let offset_before = predict_ops.offset();
+            res.push(f(&mut predict_ops, 0)?);
+            let offset_after = predict_ops.offset();
+            self.merge(predict_ops);
+
+            offset_after - offset_before
+        };
+
+        let mut cloned_ops = (1..len)
+            .into_iter()
+            .map(|i| (i, self.clone_with_offset(&offset_diff.scale(i))))
+            .collect::<Vec<_>>();
+
+        let mut arr = cloned_ops
+            .par_iter_mut()
+            .map(|(wi, op)| -> Result<T, EccUnsafeError> {
+                let offset_before = op.offset();
+                let v = f(op, *wi)?;
+                let offset_after = op.offset();
+                assert!((offset_after - offset_before).less_or_equal(&offset_diff));
+                Ok(v)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        res.append(&mut arr);
+
+        for (_, op) in cloned_ops {
+            self.merge(op);
+        }
+
+        self.apply_offset_diff(&offset_diff.scale(len));
+
+        Ok(res)
+    }
 
     fn msm_batch_on_group_non_zero_with_select_chip(
         &mut self,
@@ -259,114 +310,75 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
         }
 
         // Prepare candidation points for each group.
-        let mut candidates = vec![];
         let group_prefix = self.get_and_increase_msm_prefix();
 
-        for (group_index, chunk) in points.chunks(group_size).enumerate() {
-            let init = if group_index.is_even() {
-                &rand_line_point
-            } else {
-                &rand_line_point_neg
-            };
+        let groups = points.chunks(group_size).collect::<Vec<_>>();
+        let candidates = self.do_parallel(
+            |op, group_index| {
+                let mut res = vec![];
 
-            candidates.push(vec![init.clone()]);
-            self.kvmap_set_ecc_non_zero(group_prefix + group_index as u64, &constants[0], &init)?;
+                let init = if group_index.is_even() {
+                    &rand_line_point
+                } else {
+                    &rand_line_point_neg
+                };
 
-            let cl = candidates.last_mut().unwrap();
-            for i in 1..1u32 << chunk.len() {
-                let pos = i.reverse_bits().leading_zeros(); // find the last bit-1 position
-                let other = i - (1 << pos);
-                let p = self.ecc_add_unsafe(&cl[other as usize], &chunk[pos as usize])?;
-                let p = self.ecc_reduce_non_zero(&p)?;
+                res.push(init.clone());
+                op.kvmap_set_ecc_non_zero(group_prefix + group_index as u64, &constants[0], &init)?;
 
-                self.kvmap_set_ecc_non_zero(
-                    group_prefix + group_index as u64,
-                    &constants[i as usize],
-                    &p,
-                )?;
-                cl.push(p);
-            }
-        }
+                for i in 1..1u32 << groups[group_index].len() {
+                    let pos = i.reverse_bits().leading_zeros(); // find the last bit-1 position
+                    let other = i - (1 << pos);
+                    let p = op
+                        .ecc_add_unsafe(&res[other as usize], &groups[group_index][pos as usize])?;
+                    let p = op.ecc_reduce_non_zero(&p)?;
+
+                    op.kvmap_set_ecc_non_zero(
+                        group_prefix + group_index as u64,
+                        &constants[i as usize],
+                        &p,
+                    )?;
+                    res.push(p);
+                }
+
+                Ok(res)
+            },
+            groups.len(),
+        )?;
 
         // Decompose to get bits of each (window, group).
-        let bits = scalars
-            .into_iter()
-            .map(|s| self.decompose_scalar::<1>(s))
-            .collect::<Result<Vec<Vec<[AssignedCondition<_>; 1]>>, _>>()?;
+        let bits = self.do_parallel(
+            |op, i| {
+                let res = op.decompose_scalar::<1>(&scalars[i])?;
+                Ok(res)
+            },
+            scalars.len(),
+        )?;
 
         let groups = bits.chunks(group_size).collect::<Vec<_>>();
 
         // Accumulate points of all groups in each window.
         let windows = bits[0].len();
 
-        // For parallel setup, we calculate the offset change on first round.
-        // The diff should be same because all point are normalized.
-        let mut predict_ops = self.clone_without_offset();
-        let offset_before = predict_ops.offset();
-        let mut line_acc_arr = {
-            let mut acc = rand_acc_point_neg.clone();
-            for group_index in 0..groups.len() {
-                let group_bits = groups[group_index].iter().map(|bits| bits[0][0]).collect();
-                let (index_cell, ci) =
-                    predict_ops.pick_candidate_non_zero(&candidates[group_index], &group_bits)?;
-                let ci = predict_ops.kvmap_get_ecc_non_zero(
-                    group_index as u64 + group_prefix,
-                    &index_cell,
-                    &ci,
-                )?;
+        let line_acc_arr = self.do_parallel(
+            |op, wi| {
+                let mut acc = rand_acc_point_neg.clone();
+                for group_index in 0..groups.len() {
+                    let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
+                    let (index_cell, ci) =
+                        op.pick_candidate_non_zero(&candidates[group_index], &group_bits)?;
+                    let ci = op.kvmap_get_ecc_non_zero(
+                        group_index as u64 + group_prefix,
+                        &index_cell,
+                        &ci,
+                    )?;
 
-                acc = predict_ops.ecc_add_unsafe(&ci, &acc)?;
-            }
-            vec![acc]
-        };
-        let offset_after = predict_ops.offset();
-        let offset_diff = offset_after - offset_before;
-        self.merge(predict_ops);
-
-        // Parallel setup on window.
-        let mut cloned_ops = (1..windows)
-            .into_iter()
-            .map(|i| (i, self.clone_with_offset(&offset_diff.scale(i))))
-            .collect::<Vec<_>>();
-
-        let mut rest_line_acc_arr = cloned_ops
-            .par_iter_mut()
-            .map(
-                |(wi, op)| -> Result<AssignedNonZeroPoint<C, N>, EccUnsafeError> {
-                    let offset_before = op.offset();
-                    let mut acc = rand_acc_point_neg.clone();
-                    for group_index in 0..groups.len() {
-                        let group_bits = groups[group_index]
-                            .iter()
-                            .map(|bits| bits[*wi][0])
-                            .collect();
-                        let (index_cell, ci) =
-                            op.pick_candidate_non_zero(&candidates[group_index], &group_bits)?;
-                        let ci = op.kvmap_get_ecc_non_zero(
-                            group_index as u64 + group_prefix,
-                            &index_cell,
-                            &ci,
-                        )?;
-
-                        acc = op.ecc_add_unsafe(&ci, &acc)?;
-                    }
-                    let offset_after = op.offset();
-                    let _offset_diff = offset_after - offset_before;
-                    assert_eq!(offset_diff, _offset_diff);
-
-                    Ok(acc)
-                },
-            )
-            .collect::<Result<Vec<_>, _>>()?;
-        line_acc_arr.append(&mut rest_line_acc_arr);
-        drop(rest_line_acc_arr);
-
-        for (_, op) in cloned_ops {
-            self.merge(op);
-        }
-
-        // Set self offset to the tail and merge.
-        self.apply_offset_diff(&offset_diff.scale(windows));
+                    acc = op.ecc_add_unsafe(&ci, &acc)?;
+                }
+                Ok(acc)
+            },
+            windows,
+        )?;
 
         // Accumulate points of all windows.
         let mut acc = rand_acc_point.clone();
@@ -406,12 +418,14 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
             normalized_scalars.push(s);
         }
 
+        let timer = start_timer!(|| "msm_batch_on_group_non_zero_with_select_chip");
         let p = self.msm_batch_on_group_non_zero_with_select_chip(
             &non_zero_points,
             &normalized_scalars,
             r1,
             r2,
         )?;
+        end_timer!(timer);
 
         Ok(p)
     }

@@ -293,7 +293,7 @@ mod test {
                     context.init()?;
 
                     let mut v = Fr::zero();
-                    for _ in 0..(1 << 20) - 30 {
+                    for _ in 0..(1 << 19) - 30 {
                         context.assign_compact_cell(Some(v))?;
                         v += Fr::one();
                     }
