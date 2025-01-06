@@ -6,15 +6,12 @@ use halo2_proofs::{
     arithmetic::{BaseExt, CurveAffine, FieldExt},
     plonk::Error,
 };
-use num_bigint::BigUint;
 
 use crate::{
     assign::*,
     context::{IntegerContext, NativeEccContext},
     util::*,
 };
-
-use super::bn256_constants::*;
 
 pub trait Fq2BnSpecificOps<W: BaseExt, N: FieldExt> {
     fn fq2_mul_by_nonresidue(&mut self, a: &AssignedFq2<W, N>) -> Result<AssignedFq2<W, N>, Error>;
@@ -81,7 +78,7 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
         ))
     }
 
-    fn fq2_assign_value(&mut self, c: Option<(W, W)>) -> Result<AssignedFq2<W, N>, Error> {
+    fn fq2_assign(&mut self, c: Option<(W, W)>) -> Result<AssignedFq2<W, N>, Error> {
         let (c0, c1) = c
             .and_then(|c| Some((field_to_bn(&c.0), field_to_bn(&c.1))))
             .unzip();
@@ -390,14 +387,14 @@ pub trait Fq6ChipOps<'a, W: BaseExt, N: FieldExt>:
         ))
     }
 
-    fn fq6_assign_value(
+    fn fq6_assign(
         &mut self,
         c: Option<((W, W), (W, W), (W, W))>,
     ) -> Result<AssignedFq6<W, N>, Error> {
         Ok((
-            self.fq2_assign_value(c.map(|c| c.0))?,
-            self.fq2_assign_value(c.map(|c| c.1))?,
-            self.fq2_assign_value(c.map(|c| c.2))?,
+            self.fq2_assign(c.map(|c| c.0))?,
+            self.fq2_assign(c.map(|c| c.1))?,
+            self.fq2_assign(c.map(|c| c.2))?,
         ))
     }
 }
@@ -613,13 +610,13 @@ pub trait Fq12ChipOps<'a, W: BaseExt, N: FieldExt>:
         ))
     }
 
-    fn fq12_assign_value(
+    fn fq12_assign(
         &mut self,
         c: Option<(((W, W), (W, W), (W, W)), ((W, W), (W, W), (W, W)))>,
     ) -> Result<AssignedFq12<W, N>, Error> {
         Ok((
-            self.fq6_assign_value(c.map(|c| c.0))?,
-            self.fq6_assign_value(c.map(|c| c.1))?,
+            self.fq6_assign(c.map(|c| c.0))?,
+            self.fq6_assign(c.map(|c| c.1))?,
         ))
     }
 }
@@ -630,88 +627,6 @@ impl<'a, C: CurveAffine> Fq2ChipOps<'a, C::Base, C::Scalar> for NativeEccContext
     }
 }
 
-impl<'a, C: CurveAffine> Fq2BnSpecificOps<C::Base, C::Scalar> for NativeEccContext<'a, C> {
-    fn fq2_mul_by_nonresidue(
-        &mut self,
-        a: &AssignedFq2<C::Base, C::Scalar>,
-    ) -> Result<AssignedFq2<C::Base, C::Scalar>, Error> {
-        let a2 = self.fq2_double(a)?;
-        let a4 = self.fq2_double(&a2)?;
-        let a8 = self.fq2_double(&a4)?;
-
-        let t = self.integer_context().int_add(&a8.0, &a.0)?;
-        let c0 = self.integer_context().int_sub(&t, &a.1)?;
-
-        let t = self.integer_context().int_add(&a8.1, &a.0)?;
-        let c1 = self.integer_context().int_add(&t, &a.1)?;
-
-        Ok((c0, c1))
-    }
-
-    fn fq2_frobenius_map(
-        &mut self,
-        x: &AssignedFq2<C::Base, C::Scalar>,
-        power: usize,
-    ) -> Result<AssignedFq2<C::Base, C::Scalar>, Error> {
-        let v =
-            self.integer_context()
-                .assign_int_constant(bn_to_field(&BigUint::from_bytes_le(
-                    &FROBENIUS_COEFF_FQ2_C1[power % 2],
-                )))?;
-        Ok((x.0.clone(), self.integer_context().int_mul(&x.1, &v)?))
-    }
-}
-
 impl<'a, C: CurveAffine> Fq6ChipOps<'a, C::Base, C::Scalar> for NativeEccContext<'a, C> {}
 
-impl<'a, C: CurveAffine> Fq6BnSpecificOps<C::Base, C::Scalar> for NativeEccContext<'a, C> {
-    fn fq6_mul_by_nonresidue(
-        &mut self,
-        a: &AssignedFq6<C::Base, C::Scalar>,
-    ) -> Result<AssignedFq6<C::Base, C::Scalar>, Error> {
-        Ok((self.fq2_mul_by_nonresidue(&a.2)?, a.0.clone(), a.1.clone()))
-    }
-
-    fn fq6_frobenius_map(
-        &mut self,
-        x: &AssignedFq6<C::Base, C::Scalar>,
-        power: usize,
-    ) -> Result<AssignedFq6<C::Base, C::Scalar>, Error> {
-        let c0 = self.fq2_frobenius_map(&x.0, power)?;
-        let c1 = self.fq2_frobenius_map(&x.1, power)?;
-        let c2 = self.fq2_frobenius_map(&x.2, power)?;
-
-        let coeff_c1 =
-            FROBENIUS_COEFF_FQ6_C1[power % 6].map(|x| bn_to_field(&BigUint::from_bytes_le(&x)));
-        let coeff_c1 = self.fq2_assign_constant((coeff_c1[0], coeff_c1[1]))?;
-        let c1 = self.fq2_mul(&c1, &coeff_c1)?;
-        let coeff_c2 =
-            FROBENIUS_COEFF_FQ6_C2[power % 6].map(|x| bn_to_field(&BigUint::from_bytes_le(&x)));
-        let coeff_c2 = self.fq2_assign_constant((coeff_c2[0], coeff_c2[1]))?;
-        let c2 = self.fq2_mul(&c2, &coeff_c2)?;
-
-        Ok((c0, c1, c2))
-    }
-}
-
 impl<'a, C: CurveAffine> Fq12ChipOps<'a, C::Base, C::Scalar> for NativeEccContext<'a, C> {}
-
-impl<'a, C: CurveAffine> Fq12BnSpecificOps<C::Base, C::Scalar> for NativeEccContext<'a, C> {
-    fn fq12_frobenius_map(
-        &mut self,
-        x: &AssignedFq12<C::Base, C::Scalar>,
-        power: usize,
-    ) -> Result<AssignedFq12<C::Base, C::Scalar>, Error> {
-        let c0 = self.fq6_frobenius_map(&x.0, power)?;
-        let c1 = self.fq6_frobenius_map(&x.1, power)?;
-
-        let coeff =
-            FROBENIUS_COEFF_FQ12_C1[power % 12].map(|x| bn_to_field(&BigUint::from_bytes_le(&x)));
-        let coeff = self.fq2_assign_constant((coeff[0], coeff[1]))?;
-        let c1c0 = self.fq2_mul(&c1.0, &coeff)?;
-        let c1c1 = self.fq2_mul(&c1.1, &coeff)?;
-        let c1c2 = self.fq2_mul(&c1.2, &coeff)?;
-
-        Ok((c0, (c1c0, c1c1, c1c2)))
-    }
-}

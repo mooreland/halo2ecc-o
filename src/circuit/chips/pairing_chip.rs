@@ -1,6 +1,6 @@
-pub mod fq;
 pub mod bn256;
 pub mod bn256_constants;
+pub mod fq;
 
 /*
   The implementation is ported from https://github.com/privacy-scaling-explorations/pairing

@@ -439,8 +439,8 @@ mod test {
             let p = context.msm(&points, &scalars).unwrap();
             end_timer!(timer);
 
-            let acc = context.assign_point(Some(acc.to_affine()))?;
-            context.ecc_assert_equal(&p, &acc)?;
+            let assigned_acc = context.assign_point(Some(acc.to_affine()))?;
+            context.ecc_assert_equal(&p, &assigned_acc)?;
 
             println!("offset is {:?}", context.offset());
         } else {
