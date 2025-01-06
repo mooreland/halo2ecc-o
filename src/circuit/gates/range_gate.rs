@@ -8,6 +8,9 @@ use halo2_proofs::plonk::Expression;
 use halo2_proofs::plonk::Fixed;
 use halo2_proofs::poly::Rotation;
 use num_bigint::BigUint;
+use rayon::iter::IndexedParallelIterator as _;
+use rayon::iter::IntoParallelRefIterator as _;
+use rayon::iter::ParallelIterator as _;
 use std::marker::PhantomData;
 use std::vec;
 
@@ -226,23 +229,28 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
     }
 
     pub fn finalize_compact_cells(&mut self) -> Result<(), Error> {
-        for (offset, value) in self.compact_rows.iter().zip(self.compact_values.iter()) {
-            // TOOPTIMIZED: use GPU to batch all operations.
-            let mut value_bn = field_to_bn(value);
-            for i in 0..COMPACT_CELLS {
-                self.region.assign_advice(
-                    || "assign_compact_cell",
-                    self.range_gate_config.var_cols[i % ADV_COLUMNS],
-                    *offset + i / ADV_COLUMNS,
-                    || {
-                        let v = (&value_bn & BigUint::from((1u64 << BITS) - 1)).to_field();
-                        value_bn >>= BITS as u32;
-                        Ok(v)
-                    },
-                )?;
-            }
-            assert!(value_bn.is_zero());
-        }
+        self.compact_rows
+            .par_iter()
+            .zip(self.compact_values.par_iter())
+            .map(|(offset, value)| {
+                // TOOPTIMIZED: use GPU to batch all operations.
+                let mut value_bn = field_to_bn(value);
+                for i in 0..COMPACT_CELLS {
+                    self.region.assign_advice(
+                        || "assign_compact_cell",
+                        self.range_gate_config.var_cols[i % ADV_COLUMNS],
+                        *offset + i / ADV_COLUMNS,
+                        || {
+                            let v = (&value_bn & BigUint::from((1u64 << BITS) - 1)).to_field();
+                            value_bn >>= BITS as u32;
+                            Ok(v)
+                        },
+                    )?;
+                }
+                assert!(value_bn.is_zero());
+                Ok(())
+            })
+            .collect::<Result<(), Error>>()?;
         self.compact_values.clear();
         self.compact_rows.clear();
         Ok(())

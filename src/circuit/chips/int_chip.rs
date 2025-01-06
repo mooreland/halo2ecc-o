@@ -9,7 +9,7 @@ use num_integer::Integer;
 use crate::{
     assign::{AssignedCondition, AssignedInteger, AssignedValue, MAX_LIMBS},
     chips::native_chip::NativeChipOps,
-    context::IntegerContext,
+    context::{IntegerContext, ParallelClone as _},
     kvmap_gate::KVMapOps,
     pair,
     range_gate::{COMPACT_BITS, COMPACT_CELLS},
@@ -258,9 +258,14 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let mut queue = vec![];
         std::mem::swap(&mut queue, &mut self.int_mul_queue);
 
-        for (a, b, d, rem) in &queue {
-            self.assign_int_mul_core(a, b, d, rem)?;
-        }
+        self.do_parallel(
+            |op, i| -> Result<(), Error> {
+                let (a, b, d, rem) = &queue[i];
+                op.assign_int_mul_core(a, b, d, rem)?;
+                Ok(())
+            },
+            queue.len(),
+        )?;
 
         Ok(())
     }

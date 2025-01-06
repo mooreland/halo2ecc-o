@@ -8,115 +8,18 @@ use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Curve;
 use halo2_proofs::plonk::Error;
 use num_integer::Integer;
-use rayon::iter::IntoParallelRefMutIterator as _;
-use rayon::iter::ParallelIterator as _;
-use std::ops::Sub;
 
 use crate::assign::*;
 use crate::chips::ecc_chip::EccChipBaseOps;
 use crate::chips::native_chip::NativeChipOps;
-use crate::context::NativeEccContext;
-use crate::context::RangeRegionContext;
+use crate::context::*;
 use crate::pair;
 use crate::util::*;
 
 use super::bit_chip::BitChipOps;
 use super::ecc_chip::EccUnsafeError;
 
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct Offset {
-    pub plonk_region_offset: usize,
-    pub range_region_offset: usize,
-}
-
-impl Sub<Offset> for Offset {
-    type Output = Offset;
-
-    fn sub(mut self, rhs: Offset) -> Self::Output {
-        self.plonk_region_offset -= rhs.plonk_region_offset;
-        self.range_region_offset -= rhs.range_region_offset;
-        return self;
-    }
-}
-
-impl Offset {
-    fn scale(&self, n: usize) -> Offset {
-        Offset {
-            plonk_region_offset: self.plonk_region_offset * n,
-            range_region_offset: self.range_region_offset * n,
-        }
-    }
-
-    fn less_or_equal(&self, rhs: &Offset) -> bool {
-        self.plonk_region_offset <= rhs.plonk_region_offset
-            && self.range_region_offset <= rhs.range_region_offset
-    }
-}
-
-pub trait ParallelClone: Sized {
-    fn apply_offset_diff(&mut self, offset_diff: &Offset);
-    // WARNING: clone() doesn't clone permutation relationship, so we have to use merge() to collect them
-    fn clone_with_offset(&self, offset_diff: &Offset) -> Self;
-    fn clone_without_offset(&self) -> Self {
-        self.clone_with_offset(&Offset {
-            plonk_region_offset: 0,
-            range_region_offset: 0,
-        })
-    }
-    fn offset(&self) -> Offset;
-    fn merge(&mut self, other: Self);
-}
-
 pub const MSM_PREFIX_OFFSET: u64 = 1 << 16;
-
-impl<'b, C: CurveAffine> ParallelClone for NativeEccContext<'b, C> {
-    fn apply_offset_diff(&mut self, offset_diff: &Offset) {
-        self.get_plonk_region_context().offset += offset_diff.plonk_region_offset;
-        self.get_range_region_context().offset += offset_diff.range_region_offset;
-    }
-
-    fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
-        let mut new_context = NativeEccContext::new(
-            self.integer_context.plonk_region_context.clone(),
-            RangeRegionContext::new(
-                self.integer_context.range_region_context.region,
-                self.integer_context.range_region_context.range_gate_config,
-            ),
-            &self.integer_context.int_mul_config,
-            self.integer_context.info.clone(),
-        );
-
-        new_context.get_plonk_region_context().offset =
-            self.integer_context.plonk_region_context.offset + offset_diff.plonk_region_offset;
-        new_context.get_range_region_context().offset =
-            self.integer_context.range_region_context.offset + offset_diff.range_region_offset;
-        new_context.msm_index = self.msm_index;
-
-        new_context
-    }
-
-    fn offset(&self) -> Offset {
-        Offset {
-            plonk_region_offset: self.integer_context.plonk_region_context.offset,
-            range_region_offset: self.integer_context.range_region_context.offset,
-        }
-    }
-
-    fn merge(&mut self, mut other: Self) {
-        self.get_range_region_context()
-            .compact_rows
-            .append(&mut other.get_range_region_context().compact_rows);
-        self.get_range_region_context()
-            .compact_values
-            .append(&mut other.get_range_region_context().compact_values);
-        self.get_range_region_context()
-            .free_common_cells
-            .append(&mut other.get_range_region_context().free_common_cells);
-        self.integer_context
-            .int_mul_queue
-            .append(&mut other.integer_context.int_mul_queue);
-    }
-}
 
 impl<'b, C: CurveAffine> EccChipMSMOps<'b, C, C::Scalar> for NativeEccContext<'b, C> {
     type AssignedScalar = AssignedValue<C::Scalar>;
@@ -229,50 +132,6 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
         s: &Self::AssignedScalar,
     ) -> Result<Vec<[AssignedCondition<N>; WINDOW_SIZE]>, Error>;
 
-    fn do_parallel<T: Send, F: Sync + Fn(&mut Self, usize) -> Result<T, EccUnsafeError>>(
-        &mut self,
-        f: F,
-        len: usize,
-    ) -> Result<Vec<T>, EccUnsafeError> {
-        let mut res = vec![];
-
-        let offset_diff = {
-            let mut predict_ops = self.clone_without_offset();
-            let offset_before = predict_ops.offset();
-            res.push(f(&mut predict_ops, 0)?);
-            let offset_after = predict_ops.offset();
-            self.merge(predict_ops);
-
-            offset_after - offset_before
-        };
-
-        let mut cloned_ops = (1..len)
-            .into_iter()
-            .map(|i| (i, self.clone_with_offset(&offset_diff.scale(i))))
-            .collect::<Vec<_>>();
-
-        let mut arr = cloned_ops
-            .par_iter_mut()
-            .map(|(wi, op)| -> Result<T, EccUnsafeError> {
-                let offset_before = op.offset();
-                let v = f(op, *wi)?;
-                let offset_after = op.offset();
-                assert!((offset_after - offset_before).less_or_equal(&offset_diff));
-                Ok(v)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        res.append(&mut arr);
-
-        for (_, op) in cloned_ops {
-            self.merge(op);
-        }
-
-        self.apply_offset_diff(&offset_diff.scale(len));
-
-        Ok(res)
-    }
-
     fn msm_batch_on_group_non_zero_with_select_chip(
         &mut self,
         points: &Vec<AssignedNonZeroPoint<C, N>>,
@@ -314,7 +173,7 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
 
         let groups = points.chunks(group_size).collect::<Vec<_>>();
         let candidates = self.do_parallel(
-            |op, group_index| {
+            |op, group_index| -> Result<Vec<AssignedNonZeroPoint<C, N>>, EccUnsafeError> {
                 let mut res = vec![];
 
                 let init = if group_index.is_even() {
@@ -348,7 +207,7 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
 
         // Decompose to get bits of each (window, group).
         let bits = self.do_parallel(
-            |op, i| {
+            |op, i| -> Result<_, Error> {
                 let res = op.decompose_scalar::<1>(&scalars[i])?;
                 Ok(res)
             },
@@ -361,7 +220,7 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
         let windows = bits[0].len();
 
         let line_acc_arr = self.do_parallel(
-            |op, wi| {
+            |op, wi| -> Result<_, EccUnsafeError> {
                 let mut acc = rand_acc_point_neg.clone();
                 for group_index in 0..groups.len() {
                     let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
@@ -568,7 +427,7 @@ mod test {
             let mut scalars = vec![];
 
             let mut acc = G1Affine::identity().to_curve();
-            for _ in 0..200 {
+            for _ in 0..800 {
                 let p = G1Affine::random(OsRng);
                 let s = Fr::rand();
                 points.push(context.assign_point(Some(p))?);
