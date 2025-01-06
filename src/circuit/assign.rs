@@ -204,3 +204,87 @@ impl<N: FieldExt> MayAssignedValue<N> for Option<N> {
         None
     }
 }
+
+pub type AssignedFq<W, N> = AssignedInteger<W, N>;
+pub type AssignedFq2<W, N> = (AssignedFq<W, N>, AssignedFq<W, N>);
+pub type AssignedFq6<W, N> = (AssignedFq2<W, N>, AssignedFq2<W, N>, AssignedFq2<W, N>);
+pub type AssignedFq12<W, N> = (AssignedFq6<W, N>, AssignedFq6<W, N>);
+
+pub type AssignedG1Affine<C, N> = AssignedPoint<C, N>;
+
+#[derive(Debug, Clone)]
+pub struct AssignedG2Affine<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedFq2<C::Base, N>,
+    pub y: AssignedFq2<C::Base, N>,
+    pub z: AssignedCondition<N>,
+    _mark: PhantomData<C>,
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedG2Affine<C, N> {
+    pub fn new(
+        x: AssignedFq2<C::Base, N>,
+        y: AssignedFq2<C::Base, N>,
+        z: AssignedCondition<N>,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            _mark: PhantomData,
+        }
+    }
+}
+
+pub struct AssignedG2<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedFq2<C::Base, N>,
+    pub y: AssignedFq2<C::Base, N>,
+    pub z: AssignedFq2<C::Base, N>,
+    _mark: PhantomData<C>,
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedG2<C, N> {
+    pub fn new(
+        x: AssignedFq2<C::Base, N>,
+        y: AssignedFq2<C::Base, N>,
+        z: AssignedFq2<C::Base, N>,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            _mark: PhantomData,
+        }
+    }
+}
+
+pub struct AssignedG2Prepared<C: CurveAffine, N: FieldExt> {
+    pub coeffs: Vec<[AssignedFq2<C::Base, N>; 3]>,
+    // pub is_identity: AssignedCondition<N>, not support identity
+    _mark: PhantomData<C>,
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedG2Prepared<C, N> {
+    pub fn new(coeffs: Vec<[AssignedFq2<C::Base, N>; 3]>) -> Self {
+        Self {
+            coeffs,
+            _mark: PhantomData,
+        }
+    }
+}
+
+pub struct AssignedG2OnProvePrepared<C: CurveAffine, N: FieldExt> {
+    pub coeffs: Vec<[AssignedFq2<C::Base, N>; 2]>,
+    pub init_q: AssignedG2Affine<C, N>,
+    // pub is_identity: AssignedCondition<N>, not support identity
+    _mark: PhantomData<C>,
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedG2OnProvePrepared<C, N> {
+    pub fn new(coeffs: Vec<[AssignedFq2<C::Base, N>; 2]>, init_q: AssignedG2Affine<C, N>) -> Self {
+        Self {
+            coeffs,
+            init_q,
+            _mark: PhantomData,
+        }
+    }
+}
