@@ -8,7 +8,7 @@ authors = ["Ooglayout"]
 [dependencies]
 ark-std = { version = "0.4.0" }
 halo2_proofs = { git = "https://github.com/DelphinusLab/halo2-gpu-specific.git", branch = "moore/logup_extent", default-features = true}
-lazy_static = "1.5.0"
+lazy_static = "1.4.0"
 num-integer = "0.1"
 num-bigint = { version = "0.4.5", features = ["rand"] }
 num-traits = "0.2.18"
