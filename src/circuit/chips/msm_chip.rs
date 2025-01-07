@@ -21,7 +21,7 @@ use super::ecc_chip::EccUnsafeError;
 
 pub const MSM_PREFIX_OFFSET: u64 = 1 << 16;
 
-impl<'b, C: CurveAffine> EccChipMSMOps<'b, C, C::Scalar> for NativeEccContext<'b, C> {
+impl<'b, C: CurveAffine> EccChipMSMOps<'b, C, C::Scalar> for NativeScalarEccContext<'b, C> {
     type AssignedScalar = AssignedValue<C::Scalar>;
 
     fn get_and_increase_msm_prefix(&mut self) -> u64 {
@@ -340,11 +340,11 @@ mod test {
     use rand_core::OsRng;
 
     #[derive(Clone, Debug)]
-    struct TestCircuit<F: Clone + Fn(&mut NativeEccContext<'_, G1Affine>) -> Result<(), Error>> {
+    struct TestCircuit<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> {
         fill: F,
     }
 
-    impl<F: Clone + Fn(&mut NativeEccContext<'_, G1Affine>) -> Result<(), Error>> Circuit<Fr>
+    impl<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> Circuit<Fr>
         for TestCircuit<F>
     {
         type Config = (
@@ -386,7 +386,7 @@ mod test {
                     let plonk_region_context =
                         PlonkRegionContext::new_with_kvmap(&region, &config.0, &config.3);
                     let range_region_context = RangeRegionContext::new(&region, &config.1);
-                    let mut native_ecc_context = NativeEccContext::new(
+                    let mut native_ecc_context = NativeScalarEccContext::new(
                         plonk_region_context,
                         range_region_context,
                         &config.2,
@@ -419,7 +419,7 @@ mod test {
     }
 
     fn fill_msm_test(
-        context: &mut NativeEccContext<'_, G1Affine>,
+        context: &mut NativeScalarEccContext<'_, G1Affine>,
         is_success: bool,
     ) -> Result<(), Error> {
         if is_success {

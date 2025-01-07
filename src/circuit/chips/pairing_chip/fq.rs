@@ -9,7 +9,7 @@ use halo2_proofs::{
 
 use crate::{
     assign::*,
-    context::{IntegerContext, NativeEccContext},
+    context::{IntegerContext, NativeScalarEccContext},
     utils::*,
 };
 
@@ -621,12 +621,12 @@ pub trait Fq12ChipOps<'a, W: BaseExt, N: FieldExt>:
     }
 }
 
-impl<'a, C: CurveAffine> Fq2ChipOps<'a, C::Base, C::Scalar> for NativeEccContext<'a, C> {
+impl<'a, C: CurveAffine> Fq2ChipOps<'a, C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {
     fn integer_context(&mut self) -> &mut IntegerContext<'a, C::Base, C::Scalar> {
         &mut self.integer_context
     }
 }
 
-impl<'a, C: CurveAffine> Fq6ChipOps<'a, C::Base, C::Scalar> for NativeEccContext<'a, C> {}
+impl<'a, C: CurveAffine> Fq6ChipOps<'a, C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {}
 
-impl<'a, C: CurveAffine> Fq12ChipOps<'a, C::Base, C::Scalar> for NativeEccContext<'a, C> {}
+impl<'a, C: CurveAffine> Fq12ChipOps<'a, C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {}

@@ -9,7 +9,7 @@ use crate::{
         AssignedCondition, AssignedCurvature, AssignedInteger, AssignedNonZeroPoint, AssignedPoint,
         AssignedValue,
     },
-    context::{IntegerContext, NativeEccContext, PlonkRegionContext},
+    context::{IntegerContext, NativeScalarEccContext, PlonkRegionContext},
     utils::{bn_to_field, field_to_bn},
 };
 
@@ -29,7 +29,7 @@ impl From<Error> for EccUnsafeError {
     }
 }
 
-impl<'b, C: CurveAffine> EccChipBaseOps<'b, C, C::Scalar> for NativeEccContext<'b, C> {
+impl<'b, C: CurveAffine> EccChipBaseOps<'b, C, C::Scalar> for NativeScalarEccContext<'b, C> {
     fn integer_context<'a>(
         &'a mut self,
     ) -> &'a mut IntegerContext<'b, <C as CurveAffine>::Base, C::Scalar> {

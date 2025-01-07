@@ -6,12 +6,12 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 
 use crate::{
-    assign::*, chips::native_chip::NativeChipOps as _, context::NativeEccContext, utils::*,
+    assign::*, chips::native_chip::NativeChipOps as _, context::NativeScalarEccContext, utils::*,
 };
 
 use super::{bn256_constants::*, *};
 
-impl<'a, C: CurveAffine> Fq2BnSpecificOps<C::Base, C::Scalar> for NativeEccContext<'a, C> {
+impl<'a, C: CurveAffine> Fq2BnSpecificOps<C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {
     fn fq2_mul_by_nonresidue(
         &mut self,
         a: &AssignedFq2<C::Base, C::Scalar>,
@@ -43,7 +43,7 @@ impl<'a, C: CurveAffine> Fq2BnSpecificOps<C::Base, C::Scalar> for NativeEccConte
     }
 }
 
-impl<'a, C: CurveAffine> Fq6BnSpecificOps<C::Base, C::Scalar> for NativeEccContext<'a, C> {
+impl<'a, C: CurveAffine> Fq6BnSpecificOps<C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {
     fn fq6_mul_by_nonresidue(
         &mut self,
         a: &AssignedFq6<C::Base, C::Scalar>,
@@ -73,7 +73,7 @@ impl<'a, C: CurveAffine> Fq6BnSpecificOps<C::Base, C::Scalar> for NativeEccConte
     }
 }
 
-impl<'a, C: CurveAffine> Fq12BnSpecificOps<C::Base, C::Scalar> for NativeEccContext<'a, C> {
+impl<'a, C: CurveAffine> Fq12BnSpecificOps<C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {
     fn fq12_frobenius_map(
         &mut self,
         x: &AssignedFq12<C::Base, C::Scalar>,
@@ -93,7 +93,7 @@ impl<'a, C: CurveAffine> Fq12BnSpecificOps<C::Base, C::Scalar> for NativeEccCont
     }
 }
 
-impl<'a> NativeEccContext<'a, G1Affine> {
+impl<'a> NativeScalarEccContext<'a, G1Affine> {
     fn prepare_g2(
         &mut self,
         g2: &AssignedG2Affine<G1Affine, Fr>,
@@ -757,7 +757,7 @@ impl<'a> NativeEccContext<'a, G1Affine> {
     }
 }
 
-impl<'a> PairingChipOps<'a, G1Affine, Fr> for NativeEccContext<'a, G1Affine> {
+impl<'a> PairingChipOps<'a, G1Affine, Fr> for NativeScalarEccContext<'a, G1Affine> {
     fn prepare_g2(
         &mut self,
         g2: &AssignedG2Affine<G1Affine, Fr>,
@@ -785,7 +785,7 @@ impl<'a> PairingChipOps<'a, G1Affine, Fr> for NativeEccContext<'a, G1Affine> {
     }
 }
 
-impl<'a> PairingChipOnProvePairingOps<'a, G1Affine, Fr> for NativeEccContext<'a, G1Affine> {
+impl<'a> PairingChipOnProvePairingOps<'a, G1Affine, Fr> for NativeScalarEccContext<'a, G1Affine> {
     fn multi_miller_loop_c_wi(
         &mut self,
         c: &AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>,
@@ -850,11 +850,11 @@ mod test {
     use std::ops::Neg;
 
     #[derive(Clone, Debug)]
-    struct TestCircuit<F: Clone + Fn(&mut NativeEccContext<'_, G1Affine>) -> Result<(), Error>> {
+    struct TestCircuit<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> {
         fill: F,
     }
 
-    impl<F: Clone + Fn(&mut NativeEccContext<'_, G1Affine>) -> Result<(), Error>> Circuit<Fr>
+    impl<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> Circuit<Fr>
         for TestCircuit<F>
     {
         type Config = (
@@ -896,7 +896,7 @@ mod test {
                     let plonk_region_context =
                         PlonkRegionContext::new_with_kvmap(&region, &config.0, &config.3);
                     let range_region_context = RangeRegionContext::new(&region, &config.1);
-                    let mut native_ecc_context = NativeEccContext::new(
+                    let mut native_ecc_context = NativeScalarEccContext::new(
                         plonk_region_context,
                         range_region_context,
                         &config.2,
@@ -1085,7 +1085,7 @@ mod test {
     }
 
     fn fill_pairing_test(
-        context: &mut NativeEccContext<'_, G1Affine>,
+        context: &mut NativeScalarEccContext<'_, G1Affine>,
         is_success: bool,
     ) -> Result<(), Error> {
         if is_success {

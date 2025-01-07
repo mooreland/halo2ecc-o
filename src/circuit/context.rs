@@ -85,12 +85,12 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 }
 
 #[derive(Clone, Debug)]
-pub struct NativeEccContext<'a, C: CurveAffine> {
+pub struct NativeScalarEccContext<'a, C: CurveAffine> {
     pub(crate) msm_index: u64,
     pub(crate) integer_context: IntegerContext<'a, C::Base, C::Scalar>,
 }
 
-impl<'a, C: CurveAffine> NativeEccContext<'a, C> {
+impl<'a, C: CurveAffine> NativeScalarEccContext<'a, C> {
     pub fn new(
         plonk_region_context: PlonkRegionContext<'a, C::Scalar>,
         range_region_context: RangeRegionContext<'a, C::Scalar>,
@@ -249,9 +249,9 @@ pub trait ParallelClone: Send + Sized {
     }
 }
 
-impl<'b, C: CurveAffine> ParallelClone for NativeEccContext<'b, C> {
+impl<'b, C: CurveAffine> ParallelClone for NativeScalarEccContext<'b, C> {
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
-        NativeEccContext {
+        NativeScalarEccContext {
             msm_index: self.msm_index,
             integer_context: self.integer_context.clone_with_offset(offset_diff),
         }
