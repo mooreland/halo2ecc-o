@@ -1,5 +1,5 @@
 use halo2_proofs::{
-    arithmetic::{CurveAffine, Field, FieldExt},
+    arithmetic::{Coordinates, CurveAffine, Field, FieldExt},
     plonk::Error,
 };
 use num_bigint::BigUint;
@@ -46,7 +46,7 @@ pub trait EccChipBaseOps<'b, C: CurveAffine, N: FieldExt> {
     fn plonk_region_context<'a>(&'a mut self) -> &'a mut PlonkRegionContext<'b, N>;
 
     fn assign_constant_point(&mut self, c: C) -> Result<AssignedPoint<C, N>, Error> {
-        let coordinates = c.coordinates().into_option();
+        let coordinates: Option<Coordinates<_>> = c.coordinates().into();
         let t: Option<_> = coordinates.map(|v| (v.x().clone(), v.y().clone())).into();
         let (x, y) = t.unwrap_or((C::Base::zero(), C::Base::zero()));
         let z = if c.is_identity().into() {
