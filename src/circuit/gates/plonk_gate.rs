@@ -187,7 +187,7 @@ impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::util::test::*;
+    use crate::utils::test::*;
     use ark_std::{end_timer, start_timer};
     use floor_planner::V1;
     use halo2_proofs::arithmetic::BaseExt;

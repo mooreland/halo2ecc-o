@@ -10,7 +10,7 @@ use crate::{
         AssignedValue,
     },
     context::{IntegerContext, NativeEccContext, PlonkRegionContext},
-    util::{bn_to_field, field_to_bn},
+    utils::{bn_to_field, field_to_bn},
 };
 
 use super::{bit_chip::BitChipOps as _, int_chip::IntUnsafeError, native_chip::NativeChipOps as _};

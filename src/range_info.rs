@@ -5,9 +5,9 @@ use num_integer::Integer;
 use std::marker::PhantomData;
 
 use crate::range_gate::COMPACT_BITS;
-use crate::util::bn_to_field;
-use crate::util::field_to_bn;
-use crate::util::ToField;
+use crate::utils::bn_to_field;
+use crate::utils::field_to_bn;
+use crate::utils::ToField;
 
 pub(crate) const OVERFLOW_BITS: u64 = 6;
 pub(crate) const COMMON_RANGE_BITS: u64 = 18;

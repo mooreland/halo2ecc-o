@@ -10,7 +10,7 @@ use halo2_proofs::{
 use crate::{
     assign::*,
     context::{IntegerContext, NativeEccContext},
-    util::*,
+    utils::*,
 };
 
 pub trait Fq2BnSpecificOps<W: BaseExt, N: FieldExt> {

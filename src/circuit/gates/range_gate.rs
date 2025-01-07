@@ -17,7 +17,7 @@ use std::vec;
 use crate::assign::AssignedValue;
 use crate::context::RangeRegionContext;
 use crate::range_info::*;
-use crate::util::*;
+use crate::utils::*;
 
 const BITS: usize = COMMON_RANGE_BITS as usize; // value is 18
 const ADV_COLUMNS: usize = 3;
@@ -261,7 +261,7 @@ impl<'a, N: FieldExt> RangeRegionContext<'a, N> {
 mod test {
     use super::*;
     use crate::range_gate::RangeGate;
-    use crate::util::test::*;
+    use crate::utils::test::*;
     use ark_std::{end_timer, start_timer};
     use floor_planner::V1;
     use halo2_proofs::circuit::*;

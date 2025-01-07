@@ -78,6 +78,10 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             int_mul_queue: vec![],
         }
     }
+
+    pub fn plonk_region_context(&mut self) -> &mut PlonkRegionContext<'a, N> {
+        &mut self.plonk_region_context
+    }
 }
 
 #[derive(Clone, Debug)]

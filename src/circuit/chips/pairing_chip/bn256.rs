@@ -6,7 +6,7 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 
 use crate::{
-    assign::*, chips::native_chip::NativeChipOps as _, context::NativeEccContext, util::*,
+    assign::*, chips::native_chip::NativeChipOps as _, context::NativeEccContext, utils::*,
 };
 
 use super::{bn256_constants::*, *};
@@ -831,7 +831,7 @@ mod test {
     use crate::range_gate::RangeGate;
     use crate::range_gate::RangeGateConfig;
     use crate::range_info::RangeInfo;
-    use crate::util::test::*;
+    use crate::utils::test::*;
     use ark_std::One as _;
     use ark_std::{end_timer, start_timer};
     use floor_planner::FlatFloorPlanner;

@@ -2,7 +2,7 @@ use crate::{
     assign::{AssignedCondition, AssignedValue},
     context::PlonkRegionContext,
     pair,
-    util::*,
+    utils::*,
 };
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 

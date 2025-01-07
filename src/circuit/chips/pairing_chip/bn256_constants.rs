@@ -284,7 +284,7 @@ pub const FROBENIUS_COEFF_FQ12_C1: [[[u8; 32]; 2]; 12] = [
 
 #[test]
 fn check_pairing_constant() {
-    use crate::util::bn_to_field;
+    use crate::utils::bn_to_field;
     use halo2_proofs::pairing::bn256::Fq;
     use num_bigint::BigUint;
 

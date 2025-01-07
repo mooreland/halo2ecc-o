@@ -14,7 +14,7 @@ use crate::chips::ecc_chip::EccChipBaseOps;
 use crate::chips::native_chip::NativeChipOps;
 use crate::context::*;
 use crate::pair;
-use crate::util::*;
+use crate::utils::*;
 
 use super::bit_chip::BitChipOps;
 use super::ecc_chip::EccUnsafeError;
@@ -328,7 +328,7 @@ mod test {
     use crate::range_gate::RangeGate;
     use crate::range_gate::RangeGateConfig;
     use crate::range_info::RangeInfo;
-    use crate::util::test::*;
+    use crate::utils::test::*;
     use ark_std::{end_timer, start_timer};
     use floor_planner::FlatFloorPlanner;
     use halo2_proofs::arithmetic::BaseExt;

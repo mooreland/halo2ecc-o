@@ -16,7 +16,7 @@ use crate::{
     range_info::{
         get_bn_common_range_to_field, get_bn_compact_range, RangeInfo, COMMON_RANGE_BITS,
     },
-    util::{bn_to_field, field_to_bn, get_n_from_i32, ToField},
+    utils::{bn_to_field, field_to_bn, get_n_from_i32, ToField},
 };
 
 use super::bit_chip::BitChipOps;
@@ -905,7 +905,7 @@ mod test {
     use crate::plonk_gate::*;
     use crate::range_gate::RangeGate;
     use crate::range_gate::RangeGateConfig;
-    use crate::util::test::*;
+    use crate::utils::test::*;
     use ark_std::{end_timer, start_timer};
     use floor_planner::V1;
     use halo2_proofs::arithmetic::BaseExt;

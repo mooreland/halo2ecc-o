@@ -310,7 +310,7 @@ pub trait NativeChipOps<N: FieldExt> {
 mod test {
     use super::*;
     use crate::plonk_gate::*;
-    use crate::util::test::*;
+    use crate::utils::test::*;
     use ark_std::{end_timer, start_timer};
     use floor_planner::V1;
     use halo2_proofs::arithmetic::BaseExt;

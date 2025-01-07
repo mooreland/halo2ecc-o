@@ -4,7 +4,7 @@
 pub mod circuit;
 
 mod range_info;
-mod util;
+mod utils;
 
 #[macro_use]
 extern crate lazy_static;

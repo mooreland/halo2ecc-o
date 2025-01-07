@@ -1,7 +1,7 @@
 use crate::assign::{AssignedInteger, AssignedValue};
 use crate::context::IntegerContext;
 use crate::range_info::{get_bn_compact_range_to_field, RangeInfo};
-use crate::util::field_to_bn;
+use crate::utils::field_to_bn;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::plonk::{Error, Expression, VirtualCells};
 use halo2_proofs::{
