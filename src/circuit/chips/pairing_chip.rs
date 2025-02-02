@@ -7,8 +7,10 @@ pub mod fq;
 */
 use crate::assign::{AssignedFq12, AssignedFq2, AssignedG1Affine};
 use crate::assign::{AssignedG2, AssignedG2Affine, AssignedG2OnProvePrepared, AssignedG2Prepared};
+use crate::context::NativeScalarEccContext;
 use fq::*;
-use halo2_proofs::arithmetic::{CurveAffine, FieldExt};
+use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
+use halo2_proofs::pairing::bn256::{Fq, Fr, G1Affine};
 use halo2_proofs::plonk::Error;
 
 use super::bit_chip::BitChipOps as _;
@@ -143,7 +145,7 @@ pub trait PairingChipOps<'a, C: CurveAffine, N: FieldExt>:
 
     fn g2affine_to_g2(&mut self, g2: &AssignedG2Affine<C, N>) -> Result<AssignedG2<C, N>, Error> {
         // not support identity
-        self.integer_context()
+        self.get_integer_context()
             .plonk_region_context
             .assert_false(&g2.z)?;
         let z = self.fq2_assign_one()?;
@@ -255,5 +257,119 @@ pub trait PairingChipOnProvePairingOps<'a, C: CurveAffine, N: FieldExt>:
         let res = self.multi_miller_loop_on_prove_pairing(c, wi, terms)?;
         self.fq12_assert_one(&res)?;
         Ok(())
+    }
+}
+
+impl<'a, C: CurveAffine> PairingChipOps<'a, C, C::Scalar> for NativeScalarEccContext<'a, C> {
+    fn prepare_g2(
+        &mut self,
+        g2: &AssignedG2Affine<C, C::Scalar>,
+    ) -> Result<AssignedG2Prepared<C, C::Scalar>, Error> {
+        if C::ScalarExt::MODULUS == Fr::MODULUS {
+            unsafe {
+                let context =
+                    std::mem::transmute::<_, &mut NativeScalarEccContext<'a, G1Affine>>(self);
+                let g2 = std::mem::transmute::<_, &AssignedG2Affine<G1Affine, Fr>>(g2);
+                let res = context.prepare_g2(g2)?;
+                Ok(std::mem::transmute::<&_, &AssignedG2Prepared<C, C::Scalar>>(&res).clone())
+            }
+        } else {
+            unimplemented!()
+        }
+    }
+
+    fn multi_miller_loop(
+        &mut self,
+        terms: &[(
+            &AssignedG1Affine<C, C::Scalar>,
+            &AssignedG2Prepared<C, C::Scalar>,
+        )],
+    ) -> Result<AssignedFq12<<C as CurveAffine>::Base, C::Scalar>, Error> {
+        if C::ScalarExt::MODULUS == Fr::MODULUS {
+            unsafe {
+                let context =
+                    std::mem::transmute::<_, &mut NativeScalarEccContext<'a, G1Affine>>(self);
+                let terms = std::mem::transmute::<
+                    _,
+                    &[(
+                        &AssignedG1Affine<G1Affine, Fr>,
+                        &AssignedG2Prepared<G1Affine, Fr>,
+                    )],
+                >(terms);
+                let res = context.multi_miller_loop(terms)?;
+                Ok(std::mem::transmute::<&_, &AssignedFq12<C::Base, C::Scalar>>(&res).clone())
+            }
+        } else {
+            unimplemented!()
+        }
+    }
+
+    fn final_exponentiation(
+        &mut self,
+        f: &AssignedFq12<<C as CurveAffine>::Base, C::Scalar>,
+    ) -> Result<AssignedFq12<<C as CurveAffine>::Base, C::Scalar>, Error> {
+        if C::ScalarExt::MODULUS == Fr::MODULUS {
+            unsafe {
+                let context =
+                    std::mem::transmute::<_, &mut NativeScalarEccContext<'a, G1Affine>>(self);
+                let f = std::mem::transmute::<_, &AssignedFq12<Fq, Fr>>(f);
+                let res = context.final_exponentiation(f)?;
+                Ok(std::mem::transmute::<&_, &AssignedFq12<C::Base, C::Scalar>>(&res).clone())
+            }
+        } else {
+            unimplemented!()
+        }
+    }
+}
+
+impl<'a, C: CurveAffine> PairingChipOnProvePairingOps<'a, C, C::Scalar>
+    for NativeScalarEccContext<'a, C>
+{
+    fn multi_miller_loop_c_wi(
+        &mut self,
+        c: &AssignedFq12<<C as CurveAffine>::Base, C::Scalar>,
+        wi: &AssignedFq12<<C as CurveAffine>::Base, C::Scalar>,
+        terms: &[(
+            &AssignedG1Affine<C, C::Scalar>,
+            &AssignedG2Prepared<C, C::Scalar>,
+        )],
+    ) -> Result<AssignedFq12<<C as CurveAffine>::Base, C::Scalar>, Error> {
+        if C::ScalarExt::MODULUS == Fr::MODULUS {
+            unsafe {
+                let context =
+                    std::mem::transmute::<_, &mut NativeScalarEccContext<'a, G1Affine>>(self);
+                let c = std::mem::transmute::<_, &_>(c);
+                let wi = std::mem::transmute::<_, &_>(wi);
+                let terms = std::mem::transmute::<_, &_>(terms);
+                let res = context.multi_miller_loop_c_wi(c, wi, terms)?;
+                Ok(std::mem::transmute::<&_, &AssignedFq12<C::Base, C::Scalar>>(&res).clone())
+            }
+        } else {
+            unimplemented!()
+        }
+    }
+
+    fn multi_miller_loop_on_prove_pairing(
+        &mut self,
+        c: &AssignedFq12<<C as CurveAffine>::Base, C::Scalar>,
+        wi: &AssignedFq12<<C as CurveAffine>::Base, C::Scalar>,
+        terms: &[(
+            &AssignedG1Affine<C, C::Scalar>,
+            &AssignedG2OnProvePrepared<C, C::Scalar>,
+        )],
+    ) -> Result<AssignedFq12<<C as CurveAffine>::Base, C::Scalar>, Error> {
+        if C::ScalarExt::MODULUS == Fr::MODULUS {
+            unsafe {
+                let context =
+                    std::mem::transmute::<_, &mut NativeScalarEccContext<'a, G1Affine>>(self);
+                let c = std::mem::transmute::<_, &_>(c);
+                let wi = std::mem::transmute::<_, &_>(wi);
+                let terms = std::mem::transmute::<_, &_>(terms);
+                let res = context.multi_miller_loop_on_prove_pairing(c, wi, terms)?;
+                Ok(std::mem::transmute::<&_, &AssignedFq12<C::Base, C::Scalar>>(&res).clone())
+            }
+        } else {
+            unimplemented!()
+        }
     }
 }

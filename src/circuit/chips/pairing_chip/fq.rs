@@ -40,12 +40,12 @@ pub trait Fq12BnSpecificOps<W: BaseExt, N: FieldExt> {
 }
 
 pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
-    fn integer_context(&mut self) -> &mut IntegerContext<'a, W, N>;
+    fn get_integer_context(&mut self) -> &mut IntegerContext<'a, W, N>;
 
     fn fq2_reduce(&mut self, x: &AssignedFq2<W, N>) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().reduce(&x.0)?,
-            self.integer_context().reduce(&x.1)?,
+            self.get_integer_context().reduce(&x.0)?,
+            self.get_integer_context().reduce(&x.1)?,
         ))
     }
 
@@ -54,27 +54,27 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
         x: &AssignedFq2<W, N>,
         y: &AssignedFq2<W, N>,
     ) -> Result<(), Error> {
-        self.integer_context().assert_int_equal(&x.0, &y.0)?;
-        self.integer_context().assert_int_equal(&x.1, &y.1)?;
+        self.get_integer_context().assert_int_equal(&x.0, &y.0)?;
+        self.get_integer_context().assert_int_equal(&x.1, &y.1)?;
         Ok(())
     }
 
     fn fq2_assign_zero(&mut self) -> Result<AssignedFq2<W, N>, Error> {
-        let fq2_zero = self.integer_context().assign_int_constant(W::zero())?;
+        let fq2_zero = self.get_integer_context().assign_int_constant(W::zero())?;
         Ok((fq2_zero.clone(), fq2_zero))
     }
 
     fn fq2_assign_one(&mut self) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().assign_int_constant(W::one())?,
-            self.integer_context().assign_int_constant(W::zero())?,
+            self.get_integer_context().assign_int_constant(W::one())?,
+            self.get_integer_context().assign_int_constant(W::zero())?,
         ))
     }
 
     fn fq2_assign_constant(&mut self, c: (W, W)) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().assign_int_constant(c.0)?,
-            self.integer_context().assign_int_constant(c.1)?,
+            self.get_integer_context().assign_int_constant(c.0)?,
+            self.get_integer_context().assign_int_constant(c.1)?,
         ))
     }
 
@@ -83,8 +83,8 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
             .and_then(|c| Some((field_to_bn(&c.0), field_to_bn(&c.1))))
             .unzip();
         Ok((
-            self.integer_context().assign_w(c0)?,
-            self.integer_context().assign_w(c1)?,
+            self.get_integer_context().assign_w(c0)?,
+            self.get_integer_context().assign_w(c1)?,
         ))
     }
 
@@ -94,8 +94,8 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
         b: &AssignedFq2<W, N>,
     ) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().int_add(&a.0, &b.0)?,
-            self.integer_context().int_add(&a.1, &b.1)?,
+            self.get_integer_context().int_add(&a.0, &b.0)?,
+            self.get_integer_context().int_add(&a.1, &b.1)?,
         ))
     }
 
@@ -104,15 +104,15 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
         a: &AssignedFq2<W, N>,
         b: &AssignedFq2<W, N>,
     ) -> Result<AssignedFq2<W, N>, Error> {
-        let ab00 = self.integer_context().int_mul(&a.0, &b.0)?;
-        let ab11 = self.integer_context().int_mul(&a.1, &b.1)?;
-        let c0 = self.integer_context().int_sub(&ab00, &ab11)?;
+        let ab00 = self.get_integer_context().int_mul(&a.0, &b.0)?;
+        let ab11 = self.get_integer_context().int_mul(&a.1, &b.1)?;
+        let c0 = self.get_integer_context().int_sub(&ab00, &ab11)?;
 
-        let a01 = self.integer_context().int_add(&a.0, &a.1)?;
-        let b01 = self.integer_context().int_add(&b.0, &b.1)?;
-        let c1 = self.integer_context().int_mul(&a01, &b01)?;
-        let c1 = self.integer_context().int_sub(&c1, &ab00)?;
-        let c1 = self.integer_context().int_sub(&c1, &ab11)?;
+        let a01 = self.get_integer_context().int_add(&a.0, &a.1)?;
+        let b01 = self.get_integer_context().int_add(&b.0, &b.1)?;
+        let c1 = self.get_integer_context().int_mul(&a01, &b01)?;
+        let c1 = self.get_integer_context().int_sub(&c1, &ab00)?;
+        let c1 = self.get_integer_context().int_sub(&c1, &ab11)?;
 
         Ok((c0, c1))
     }
@@ -123,15 +123,15 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
         b: &AssignedFq2<W, N>,
     ) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().int_sub(&a.0, &b.0)?,
-            self.integer_context().int_sub(&a.1, &b.1)?,
+            self.get_integer_context().int_sub(&a.0, &b.0)?,
+            self.get_integer_context().int_sub(&a.1, &b.1)?,
         ))
     }
 
     fn fq2_double(&mut self, a: &AssignedFq2<W, N>) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().int_add(&a.0, &a.0)?,
-            self.integer_context().int_add(&a.1, &a.1)?,
+            self.get_integer_context().int_add(&a.0, &a.0)?,
+            self.get_integer_context().int_add(&a.1, &a.1)?,
         ))
     }
 
@@ -141,23 +141,23 @@ pub trait Fq2ChipOps<'a, W: BaseExt, N: FieldExt> {
 
     fn fq2_neg(&mut self, a: &AssignedFq2<W, N>) -> Result<AssignedFq2<W, N>, Error> {
         Ok((
-            self.integer_context().int_neg(&a.0)?,
-            self.integer_context().int_neg(&a.1)?,
+            self.get_integer_context().int_neg(&a.0)?,
+            self.get_integer_context().int_neg(&a.1)?,
         ))
     }
 
     fn fq2_conjugate(&mut self, a: &AssignedFq2<W, N>) -> Result<AssignedFq2<W, N>, Error> {
-        Ok((a.0.clone(), self.integer_context().int_neg(&a.1)?))
+        Ok((a.0.clone(), self.get_integer_context().int_neg(&a.1)?))
     }
 
     fn fq2_unsafe_invert(&mut self, x: &AssignedFq2<W, N>) -> Result<AssignedFq2<W, N>, Error> {
-        let t0 = self.integer_context().int_square(&x.0)?;
-        let t1 = self.integer_context().int_square(&x.1)?;
-        let t0 = self.integer_context().int_add(&t0, &t1)?;
-        let t = self.integer_context().int_unsafe_invert(&t0).unwrap();
-        let c0 = self.integer_context().int_mul(&x.0, &t)?;
-        let c1 = self.integer_context().int_mul(&x.1, &t)?;
-        let c1 = self.integer_context().int_neg(&c1)?;
+        let t0 = self.get_integer_context().int_square(&x.0)?;
+        let t1 = self.get_integer_context().int_square(&x.1)?;
+        let t0 = self.get_integer_context().int_add(&t0, &t1)?;
+        let t = self.get_integer_context().int_unsafe_invert(&t0).unwrap();
+        let c0 = self.get_integer_context().int_mul(&x.0, &t)?;
+        let c1 = self.get_integer_context().int_mul(&x.1, &t)?;
+        let c1 = self.get_integer_context().int_neg(&c1)?;
         Ok((c0, c1))
     }
 }
@@ -622,7 +622,7 @@ pub trait Fq12ChipOps<'a, W: BaseExt, N: FieldExt>:
 }
 
 impl<'a, C: CurveAffine> Fq2ChipOps<'a, C::Base, C::Scalar> for NativeScalarEccContext<'a, C> {
-    fn integer_context(&mut self) -> &mut IntegerContext<'a, C::Base, C::Scalar> {
+    fn get_integer_context(&mut self) -> &mut IntegerContext<'a, C::Base, C::Scalar> {
         &mut self.integer_context
     }
 }

@@ -27,12 +27,12 @@ pub struct IntMulGateConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct IntMulGate<W: FieldExt, N: FieldExt> {
+pub struct IntMulGate<W: BaseExt, N: FieldExt> {
     pub config: IntMulGateConfig,
     mark: PhantomData<(W, N)>,
 }
 
-impl<W: FieldExt, N: FieldExt> IntMulGate<W, N> {
+impl<W: BaseExt, N: FieldExt> IntMulGate<W, N> {
     pub fn new(config: IntMulGateConfig) -> Self {
         Self {
             config,

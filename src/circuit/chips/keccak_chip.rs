@@ -346,4 +346,8 @@ pub trait KeccakChipOps<'a, N: FieldExt> {
     }
 }
 
-impl<'a, N: FieldExt> PlonkRegionContext<'a, N> {}
+impl<'a, N: FieldExt> KeccakChipOps<'a, N> for PlonkRegionContext<'a, N> {
+    fn plonk_region_context(&mut self) -> &mut PlonkRegionContext<'a, N> {
+        self
+    }
+}

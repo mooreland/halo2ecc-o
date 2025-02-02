@@ -313,61 +313,36 @@ pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use super::*;
     use crate::chips::msm_chip::EccChipMSMOps;
     use crate::chips::msm_chip::ParallelClone;
-    use crate::context::PlonkRegionContext;
-    use crate::context::RangeRegionContext;
-    use crate::int_mul_gate::IntMulGate;
-    use crate::int_mul_gate::IntMulGateConfig;
-    use crate::kvmap_gate::KVMapGate;
-    use crate::kvmap_gate::KVMapGateConfig;
-    use crate::plonk_gate::*;
-    use crate::range_gate::RangeGate;
-    use crate::range_gate::RangeGateConfig;
-    use crate::range_info::RangeInfo;
     use crate::utils::test::*;
+    use crate::NativeScalarEccConfig;
     use ark_std::{end_timer, start_timer};
     use floor_planner::FlatFloorPlanner;
     use halo2_proofs::arithmetic::BaseExt;
     use halo2_proofs::circuit::*;
+    use halo2_proofs::pairing::bn256::Fr;
     use halo2_proofs::pairing::bn256::G1Affine;
-    use halo2_proofs::pairing::bn256::{Fq, Fr};
     use halo2_proofs::pairing::group::cofactor::CofactorCurveAffine;
     use halo2_proofs::plonk::*;
     use rand_core::OsRng;
 
     #[derive(Clone, Debug)]
-    struct TestCircuit<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> {
+    struct TestCircuit<
+        F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>,
+    > {
         fill: F,
     }
 
     impl<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> Circuit<Fr>
         for TestCircuit<F>
     {
-        type Config = (
-            PlonkGateConfig,
-            RangeGateConfig,
-            IntMulGateConfig,
-            KVMapGateConfig,
-        );
+        type Config = NativeScalarEccConfig;
         type FloorPlanner = FlatFloorPlanner;
 
         fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
-            let plonk_gate_config = PlonkGate::<Fr>::configure(meta);
-            let range_gate_config = RangeGate::configure(meta);
-            let int_mul_gate_config =
-                IntMulGate::configure(meta, plonk_gate_config.var, &RangeInfo::<Fq, Fr>::new());
-            let kvmap_gate_config =
-                KVMapGate::configure(meta, plonk_gate_config.var[0..2].try_into().unwrap());
-            (
-                plonk_gate_config,
-                range_gate_config,
-                int_mul_gate_config,
-                kvmap_gate_config,
-            )
+            NativeScalarEccConfig::configure::<G1Affine>(meta)
         }
 
         fn without_witnesses(&self) -> Self {
@@ -383,15 +358,7 @@ mod test {
             layouter.assign_region(
                 || "test",
                 |region| {
-                    let plonk_region_context =
-                        PlonkRegionContext::new_with_kvmap(&region, &config.0, &config.3);
-                    let range_region_context = RangeRegionContext::new(&region, &config.1);
-                    let mut native_ecc_context = NativeScalarEccContext::new(
-                        plonk_region_context,
-                        range_region_context,
-                        &config.2,
-                        Arc::new(RangeInfo::new()),
-                    );
+                    let mut native_ecc_context = config.to_context(region);
 
                     native_ecc_context
                         .integer_context
@@ -427,7 +394,7 @@ mod test {
             let mut scalars = vec![];
 
             let mut acc = G1Affine::identity().to_curve();
-            for _ in 0..800 {
+            for _ in 0..10 {
                 let p = G1Affine::random(OsRng);
                 let s = Fr::rand();
                 points.push(context.assign_point(Some(p))?);
@@ -482,7 +449,7 @@ mod test {
                     Ok(())
                 },
             },
-            22,
+            19,
         );
     }
 

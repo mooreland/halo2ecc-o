@@ -20,11 +20,11 @@ impl<'a, C: CurveAffine> Fq2BnSpecificOps<C::Base, C::Scalar> for NativeScalarEc
         let a4 = self.fq2_double(&a2)?;
         let a8 = self.fq2_double(&a4)?;
 
-        let t = self.integer_context().int_add(&a8.0, &a.0)?;
-        let c0 = self.integer_context().int_sub(&t, &a.1)?;
+        let t = self.get_integer_context().int_add(&a8.0, &a.0)?;
+        let c0 = self.get_integer_context().int_sub(&t, &a.1)?;
 
-        let t = self.integer_context().int_add(&a8.1, &a.0)?;
-        let c1 = self.integer_context().int_add(&t, &a.1)?;
+        let t = self.get_integer_context().int_add(&a8.1, &a.0)?;
+        let c1 = self.get_integer_context().int_add(&t, &a.1)?;
 
         Ok((c0, c1))
     }
@@ -34,12 +34,10 @@ impl<'a, C: CurveAffine> Fq2BnSpecificOps<C::Base, C::Scalar> for NativeScalarEc
         x: &AssignedFq2<C::Base, C::Scalar>,
         power: usize,
     ) -> Result<AssignedFq2<C::Base, C::Scalar>, Error> {
-        let v =
-            self.integer_context()
-                .assign_int_constant(bn_to_field(&BigUint::from_bytes_le(
-                    &FROBENIUS_COEFF_FQ2_C1[power % 2],
-                )))?;
-        Ok((x.0.clone(), self.integer_context().int_mul(&x.1, &v)?))
+        let v = self.get_integer_context().assign_int_constant(bn_to_field(
+            &BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ2_C1[power % 2]),
+        ))?;
+        Ok((x.0.clone(), self.get_integer_context().int_mul(&x.1, &v)?))
     }
 }
 
@@ -94,7 +92,7 @@ impl<'a, C: CurveAffine> Fq12BnSpecificOps<C::Base, C::Scalar> for NativeScalarE
 }
 
 impl<'a> NativeScalarEccContext<'a, G1Affine> {
-    fn prepare_g2(
+    pub(crate) fn prepare_g2(
         &mut self,
         g2: &AssignedG2Affine<G1Affine, Fr>,
     ) -> Result<AssignedG2Prepared<G1Affine, Fr>, Error> {
@@ -132,10 +130,10 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
             bn_to_field(&BigUint::from_bytes_le(&XI_TO_Q_MINUS_1_OVER_2[1])),
         ))?;
 
-        q1.x.1 = self.integer_context().int_neg(&q1.x.1)?;
+        q1.x.1 = self.get_integer_context().int_neg(&q1.x.1)?;
         q1.x = self.fq2_mul(&q1.x, &c11)?;
 
-        q1.y.1 = self.integer_context().int_neg(&q1.y.1)?;
+        q1.y.1 = self.get_integer_context().int_neg(&q1.y.1)?;
         q1.y = self.fq2_mul(&q1.y, &xi)?;
 
         coeffs.push(self.addition_step(&mut r, &q1)?);
@@ -147,7 +145,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         Ok(AssignedG2Prepared::new(coeffs))
     }
 
-    fn ell(
+    pub(crate) fn ell(
         &mut self,
         f: &AssignedFq12<Fq, Fr>,
         coeffs: &[AssignedFq2<Fq, Fr>; 3],
@@ -158,17 +156,17 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let c10 = &coeffs[1].0;
         let c11 = &coeffs[1].1;
 
-        let c00 = self.integer_context().int_mul(&c00, &p.y)?;
-        let c01 = self.integer_context().int_mul(&c01, &p.y)?;
-        let c10 = self.integer_context().int_mul(&c10, &p.x)?;
-        let c11 = self.integer_context().int_mul(&c11, &p.x)?;
+        let c00 = self.get_integer_context().int_mul(&c00, &p.y)?;
+        let c01 = self.get_integer_context().int_mul(&c01, &p.y)?;
+        let c10 = self.get_integer_context().int_mul(&c10, &p.x)?;
+        let c11 = self.get_integer_context().int_mul(&c11, &p.x)?;
 
         self.fq12_mul_by_034(f, &(c00, c01), &(c10, c11), &coeffs[2])
     }
 
     // -y + alpha*x*w + bias*w^3 (alpha is slope, w is Fp12 =Fp2[w]/(w^2-u), Fp12 represents in Fp2)
     // coeffs:[alpha, bias] and exclude neg_one to save 1 circuit allocation
-    fn ell_on_prove_pairing(
+    pub(crate) fn ell_on_prove_pairing(
         &mut self,
         f: &AssignedFq12<Fq, Fr>,
         neg_one: &AssignedFq2<Fq, Fr>,
@@ -180,15 +178,15 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let c10 = &coeffs[0].0;
         let c11 = &coeffs[0].1;
 
-        let c00 = self.integer_context().int_mul(&c00, &p.y)?;
-        let c01 = self.integer_context().int_mul(&c01, &p.y)?;
-        let c10 = self.integer_context().int_mul(&c10, &p.x)?;
-        let c11 = self.integer_context().int_mul(&c11, &p.x)?;
+        let c00 = self.get_integer_context().int_mul(&c00, &p.y)?;
+        let c01 = self.get_integer_context().int_mul(&c01, &p.y)?;
+        let c10 = self.get_integer_context().int_mul(&c10, &p.x)?;
+        let c11 = self.get_integer_context().int_mul(&c11, &p.x)?;
 
         self.fq12_mul_by_034(f, &(c00, c01), &(c10, c11), &coeffs[1])
     }
 
-    fn multi_miller_loop(
+    pub(crate) fn multi_miller_loop(
         &mut self,
         terms: &[(
             &AssignedG1Affine<G1Affine, Fr>,
@@ -198,7 +196,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.integer_context()
+            self.get_integer_context()
                 .plonk_region_context
                 .assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
@@ -247,7 +245,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
     // verify miller loop rst by supplied c&wi instead of final exponent
     // c: lamada-th residual root for miller loop rst f
     // wi: make sure f*wi be 3-th residual
-    fn multi_miller_loop_c_wi(
+    pub(crate) fn multi_miller_loop_c_wi(
         &mut self,
         c: &AssignedFq12<Fq, Fr>,
         wi: &AssignedFq12<Fq, Fr>,
@@ -259,7 +257,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.integer_context()
+            self.get_integer_context()
                 .plonk_region_context
                 .assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
@@ -330,7 +328,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
 
     // compute miller loop in affine coordinates and verify by c&wi
     // not including verify for step by step's add/double point
-    fn multi_miller_loop_on_prove_pairing(
+    pub(crate) fn multi_miller_loop_on_prove_pairing(
         &mut self,
         c: &AssignedFq12<Fq, Fr>,
         wi: &AssignedFq12<Fq, Fr>,
@@ -342,7 +340,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.integer_context()
+            self.get_integer_context()
                 .plonk_region_context
                 .assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
@@ -455,7 +453,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         *r = AssignedG2Affine::new(
             x3,
             y3,
-            self.integer_context()
+            self.get_integer_context()
                 .plonk_region_context
                 .assign_constant(Fr::zero())?
                 .into(),
@@ -497,7 +495,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         *r = AssignedG2Affine::new(
             x3,
             y3,
-            self.integer_context()
+            self.get_integer_context()
                 .plonk_region_context
                 .assign_constant(Fr::zero())?
                 .into(),
@@ -520,7 +518,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.integer_context()
+            self.get_integer_context()
                 .plonk_region_context
                 .assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
@@ -552,10 +550,10 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
                 bn_to_field(&BigUint::from_bytes_le(&XI_TO_Q_MINUS_1_OVER_2[1])),
             ))?;
 
-            q1.x.1 = self.integer_context().int_neg(&q1.x.1)?;
+            q1.x.1 = self.get_integer_context().int_neg(&q1.x.1)?;
             q1.x = self.fq2_mul(&q1.x, &c11)?;
 
-            q1.y.1 = self.integer_context().int_neg(&q1.y.1)?;
+            q1.y.1 = self.get_integer_context().int_neg(&q1.y.1)?;
             q1.y = self.fq2_mul(&q1.y, &xi)?;
 
             let mut minusq2 = q.clone();
@@ -670,7 +668,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         Ok(res)
     }
 
-    fn final_exponentiation(
+    pub(crate) fn final_exponentiation(
         &mut self,
         f: &AssignedFq12<Fq, Fr>,
     ) -> Result<AssignedFq12<Fq, Fr>, Error> {
@@ -757,62 +755,6 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
     }
 }
 
-impl<'a> PairingChipOps<'a, G1Affine, Fr> for NativeScalarEccContext<'a, G1Affine> {
-    fn prepare_g2(
-        &mut self,
-        g2: &AssignedG2Affine<G1Affine, Fr>,
-    ) -> Result<AssignedG2Prepared<G1Affine, Fr>, Error> {
-        self.prepare_g2(g2)
-    }
-
-    fn multi_miller_loop(
-        &mut self,
-        terms: &[(
-            &AssignedG1Affine<G1Affine, Fr>,
-            &AssignedG2Prepared<G1Affine, Fr>,
-        )],
-    ) -> Result<AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>, Error>
-    {
-        self.multi_miller_loop(terms)
-    }
-
-    fn final_exponentiation(
-        &mut self,
-        f: &AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>,
-    ) -> Result<AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>, Error>
-    {
-        self.final_exponentiation(f)
-    }
-}
-
-impl<'a> PairingChipOnProvePairingOps<'a, G1Affine, Fr> for NativeScalarEccContext<'a, G1Affine> {
-    fn multi_miller_loop_c_wi(
-        &mut self,
-        c: &AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>,
-        wi: &AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>,
-        terms: &[(
-            &AssignedG1Affine<G1Affine, Fr>,
-            &AssignedG2Prepared<G1Affine, Fr>,
-        )],
-    ) -> Result<AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>, Error>
-    {
-        self.multi_miller_loop_c_wi(c, wi, terms)
-    }
-
-    fn multi_miller_loop_on_prove_pairing(
-        &mut self,
-        c: &AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>,
-        wi: &AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>,
-        terms: &[(
-            &AssignedG1Affine<G1Affine, Fr>,
-            &AssignedG2OnProvePrepared<G1Affine, Fr>,
-        )],
-    ) -> Result<AssignedFq12<<G1Affine as halo2_proofs::arithmetic::CurveAffine>::Base, Fr>, Error>
-    {
-        self.multi_miller_loop_on_prove_pairing(c, wi, terms)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::str::FromStr as _;
@@ -850,7 +792,9 @@ mod test {
     use std::ops::Neg;
 
     #[derive(Clone, Debug)]
-    struct TestCircuit<F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>> {
+    struct TestCircuit<
+        F: Clone + Fn(&mut NativeScalarEccContext<'_, G1Affine>) -> Result<(), Error>,
+    > {
         fill: F,
     }
 
