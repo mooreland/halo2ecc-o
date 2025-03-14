@@ -539,35 +539,6 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.1.0-beta.1"
-source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git?tag=stable-logup-shuffle-1.0.0#55d1969571375005206615deb6ff0395a7ca1607"
-dependencies = [
- "ark-std",
- "blake2b_simd",
- "bumpalo",
- "cfg-if 0.1.10",
- "core_affinity",
- "cuda-driver-sys",
- "ec-gpu-gen",
- "ff",
- "group",
- "lazy_static",
- "log",
- "memmap",
- "num",
- "num-bigint",
- "num-derive",
- "num-integer",
- "num-traits",
- "pairing_bn256",
- "rand",
- "rand_core",
- "rayon",
- "subtle",
-]
-
-[[package]]
-name = "halo2_proofs"
-version = "0.1.0-beta.1"
 source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git?tag=stable-logup-shuffle-v1.0.0#55d1969571375005206615deb6ff0395a7ca1607"
 dependencies = [
  "ark-std",
@@ -600,7 +571,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "chrono",
- "halo2_proofs 0.1.0-beta.1 (git+https://github.com/DelphinusLab/halo2-gpu-specific.git?tag=stable-logup-shuffle-v1.0.0)",
+ "halo2_proofs",
  "lazy_static",
  "num-bigint",
  "num-integer",
@@ -1370,13 +1341,13 @@ dependencies = [
 [[package]]
 name = "zkwasm-prover"
 version = "0.1.0"
-source = "git+https://github.com/DelphinusLab/zkWasm-prover?branch=moore/logup-shuffle-oogl-rebase#a58c158ec0f5e7637820c5f0ef482e0f79b9f2f6"
+source = "git+https://github.com/DelphinusLab/zkWasm-prover?tag=stable-logup-shuffle-v1.0#198d74b3aef0101f6fee7c07873a0ea2e859de2c"
 dependencies = [
  "ark-std",
  "cc",
  "cuda-runtime-sys",
  "env_logger",
- "halo2_proofs 0.1.0-beta.1 (git+https://github.com/DelphinusLab/halo2-gpu-specific.git?tag=stable-logup-shuffle-1.0.0)",
+ "halo2_proofs",
  "lazy_static",
  "libc",
  "log",
