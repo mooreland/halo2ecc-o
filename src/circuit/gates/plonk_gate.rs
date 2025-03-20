@@ -328,7 +328,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature="profile")]
+    #[cfg(feature = "profile")]
     fn bench_plonk_gate() {
         bench_circuit_on_bn256(gen_random_plonk_gate_test_circuit(22), 22);
     }

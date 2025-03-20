@@ -754,7 +754,10 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         self.int_mul(a, a)
     }
 
-    pub fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> Result<AssignedInteger<W, N>, IntUnsafeError> {
+    pub fn int_unsafe_invert(
+        &mut self,
+        x: &AssignedInteger<W, N>,
+    ) -> Result<AssignedInteger<W, N>, IntUnsafeError> {
         // TODO: optimize by one
         let one = self.assign_int_constant(W::one())?;
         self.int_div_unsafe(&one, x)

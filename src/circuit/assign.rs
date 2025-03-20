@@ -100,6 +100,10 @@ impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
             phantom: PhantomData,
         }
     }
+
+    pub fn limbs(&self) -> &[Option<AssignedValue<N>>] {
+        &self.limbs_le
+    }
 }
 
 #[derive(Clone, Debug)]
