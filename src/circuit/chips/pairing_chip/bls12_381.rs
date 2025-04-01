@@ -3,7 +3,7 @@
 */
 
 use halo2_proofs::{
-    arithmetic::{CurveAffine, Field, FieldExt},
+    arithmetic::{CurveAffine, FieldExt},
     pairing::{
         bls12_381::{Fq, G1Affine},
         bn256::Fr,
@@ -19,7 +19,7 @@ use crate::{
     context::IntegerContext,
 };
 
-use super::{bn256_constants::*, *};
+use super::*;
 
 impl<'a, C: CurveAffine, N: FieldExt> Fq2BnSpecificOps<Fq, N> for GeneralScalarEccContext<'a, C, N>
 where

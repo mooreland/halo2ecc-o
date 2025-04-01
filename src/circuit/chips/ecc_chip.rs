@@ -38,6 +38,12 @@ impl<'b, C: CurveAffine> EccChipBaseOps<'b, C, C::Scalar> for NativeScalarEccCon
         &mut self.integer_context
     }
 
+    fn scalar_integer_context<'a>(
+        &'a mut self,
+    ) -> &'a mut IntegerContext<'b, <C as CurveAffine>::ScalarExt, C::Scalar> {
+        unreachable!()
+    }
+
     fn plonk_region_context<'a>(&'a mut self) -> RefMut<PlonkRegionContext<'b, C::Scalar>> {
         self.get_plonk_region_context()
     }
@@ -52,6 +58,12 @@ impl<'b, C: CurveAffine, N: FieldExt> EccChipBaseOps<'b, C, N>
         &mut self.integer_context
     }
 
+    fn scalar_integer_context<'a>(
+        &'a mut self,
+    ) -> &'a mut IntegerContext<'b, <C as CurveAffine>::ScalarExt, N> {
+        &mut self.scalar_integer_context
+    }
+
     fn plonk_region_context<'a>(&'a mut self) -> RefMut<PlonkRegionContext<'b, N>> {
         self.get_plonk_region_context()
     }
@@ -59,6 +71,7 @@ impl<'b, C: CurveAffine, N: FieldExt> EccChipBaseOps<'b, C, N>
 
 pub trait EccChipBaseOps<'b, C: CurveAffine, N: FieldExt> {
     fn integer_context<'a>(&'a mut self) -> &'a mut IntegerContext<'b, C::Base, N>;
+    fn scalar_integer_context<'a>(&'a mut self) -> &'a mut IntegerContext<'b, C::ScalarExt, N>;
     fn plonk_region_context<'a>(&'a mut self) -> RefMut<PlonkRegionContext<'b, N>>;
 
     fn assign_constant_point(&mut self, c: C) -> Result<AssignedPoint<C, N>, Error> {

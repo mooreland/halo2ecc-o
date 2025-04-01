@@ -11,7 +11,6 @@ use halo2_proofs::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 pub use gates::*;
 use int_mul_gate::{IntMulGate, IntMulGateConfig};

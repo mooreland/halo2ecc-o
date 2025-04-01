@@ -1,3 +1,5 @@
+use crate::chips::ecc_chip::EccChipBaseOps;
+use crate::range_info::RangeInfo;
 use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
 use halo2_proofs::circuit::Region;
 use rayon::iter::{IntoParallelRefMutIterator as _, ParallelIterator as _};
@@ -5,11 +7,8 @@ use std::cell::RefCell;
 use std::cell::RefMut;
 use std::ops::Sub;
 use std::rc::Rc;
-use std::sync::Arc;
 
-use crate::range_info::RangeInfo;
-
-use super::assign::{AssignedInteger, AssignedValue, MAX_LIMBS};
+use super::assign::{AssignedInteger, AssignedValue};
 use super::int_mul_gate::IntMulGateConfig;
 use super::kvmap_gate::KVMapGateConfig;
 use super::plonk_gate::PlonkGateConfig;
@@ -60,7 +59,7 @@ pub struct IntegerContext<'a, W: BaseExt, N: FieldExt> {
     pub(crate) int_mul_queue: Vec<(
         AssignedInteger<W, N>,
         AssignedInteger<W, N>,
-        [Option<AssignedValue<N>>; MAX_LIMBS],
+        Vec<Option<AssignedValue<N>>>,
         AssignedInteger<W, N>,
     )>,
 }
@@ -92,7 +91,6 @@ unsafe impl<'a, C: CurveAffine> Send for NativeScalarEccContext<'a, C> {}
 pub struct NativeScalarEccContext<'a, C: CurveAffine> {
     pub(crate) msm_index: u64,
     pub(crate) integer_context: IntegerContext<'a, C::Base, C::Scalar>,
-    // range_region_context: Rc<RefCell<RangeRegionContext<'a, C::Scalar>>>,
 }
 
 impl<'a, C: CurveAffine> NativeScalarEccContext<'a, C> {
@@ -110,7 +108,6 @@ impl<'a, C: CurveAffine> NativeScalarEccContext<'a, C> {
                 int_mul_config,
                 info,
             ),
-            // range_region_context,
         }
     }
 
@@ -330,10 +327,17 @@ impl<'b, C: CurveAffine> ParallelClone for NativeScalarEccContext<'b, C> {
 
 impl<'b, C: CurveAffine, N: FieldExt> ParallelClone for GeneralScalarEccContext<'b, C, N> {
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
+        let integer_context = self.integer_context.clone_with_offset(offset_diff);
+        let scalar_integer_context = IntegerContext::new(
+            integer_context.plonk_region_context.clone(),
+            integer_context.range_region_context.clone(),
+            integer_context.int_mul_config,
+            self.scalar_integer_context.info.clone(),
+        );
         GeneralScalarEccContext {
             msm_index: self.msm_index,
-            integer_context: self.integer_context.clone_with_offset(offset_diff),
-            scalar_integer_context: self.scalar_integer_context.clone_with_offset(offset_diff),
+            integer_context,
+            scalar_integer_context,
         }
     }
 
@@ -344,7 +348,8 @@ impl<'b, C: CurveAffine, N: FieldExt> ParallelClone for GeneralScalarEccContext<
     fn merge_mut(&mut self, other: &mut Self) {
         self.integer_context.merge_mut(&mut other.integer_context);
         self.scalar_integer_context
-            .merge_mut(&mut other.scalar_integer_context);
+            .int_mul_queue
+            .append(&mut other.scalar_integer_context().int_mul_queue);
         self.msm_index = self.msm_index.max(other.msm_index);
     }
 }

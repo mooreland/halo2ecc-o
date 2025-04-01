@@ -65,7 +65,7 @@ impl<N: FieldExt> AsRef<AssignedValue<N>> for AssignedCondition<N> {
 #[derive(Clone, Debug)]
 pub struct AssignedInteger<W: BaseExt, N: FieldExt> {
     pub(crate) value: Option<BigUint>,
-    pub(crate) limbs_le: [Option<AssignedValue<N>>; MAX_LIMBS],
+    pub(crate) limbs_le: Vec<Option<AssignedValue<N>>>,
     pub(crate) native: AssignedValue<N>,
     pub(crate) times: usize,
     phantom: PhantomData<W>,
@@ -73,21 +73,21 @@ pub struct AssignedInteger<W: BaseExt, N: FieldExt> {
 
 impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
     pub fn new(
-        limbs_le: [Option<AssignedValue<N>>; MAX_LIMBS],
+        limbs_le: &[Option<AssignedValue<N>>],
         native: AssignedValue<N>,
         value: Option<BigUint>,
     ) -> Self {
         Self {
             value,
             native,
-            limbs_le,
+            limbs_le: limbs_le.into(),
             times: 1,
             phantom: PhantomData,
         }
     }
 
     pub fn new_with_times(
-        limbs_le: [Option<AssignedValue<N>>; MAX_LIMBS],
+        limbs_le: &[Option<AssignedValue<N>>],
         native: AssignedValue<N>,
         value: Option<BigUint>,
         times: usize,
@@ -95,7 +95,7 @@ impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
         Self {
             value,
             native,
-            limbs_le,
+            limbs_le: limbs_le.into(),
             times,
             phantom: PhantomData,
         }
