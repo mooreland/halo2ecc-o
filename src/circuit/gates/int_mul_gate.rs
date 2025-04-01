@@ -88,7 +88,9 @@ impl<W: BaseExt, N: FieldExt> IntMulGate<W, N> {
             .map(|_| alloc())
             .collect::<Vec<_>>();
 
-        let v_list: Vec<_> = (0..info.limbs).map(|_| (alloc(), alloc())).collect();
+        let v_list: Vec<_> = (0..info.mul_check_limbs)
+            .map(|_| (alloc(), alloc()))
+            .collect();
 
         let to_cell =
             |meta: &mut VirtualCells<N>, (col, row)| meta.query_advice(vars[col], Rotation(row));
@@ -146,8 +148,22 @@ impl<W: BaseExt, N: FieldExt> IntMulGate<W, N> {
                 );
             }
 
-            // Only support BN254 currently
-            assert!(info.limbs == info.mul_check_limbs);
+            // Only required by bl12_381 base field
+            for i in info.limbs as usize..info.mul_check_limbs as usize {
+                let u = limbs_sum[i].clone()
+                    + to_cell(meta, v_h) * to_constant(info.limb_coeffs[1])
+                    + to_cell(meta, v_l) * to_constant(info.limb_coeffs[0])
+                    + to_constant(borrow);
+                v_h = v_list[i].0;
+                v_l = v_list[i].1;
+
+                // prove (limbs[0] + borrow - rem[0]) % limbs_size == 0
+                constraints.push(
+                    to_cell(meta, v_h) * to_constant(info.limb_coeffs[2])
+                        + to_cell(meta, v_l) * to_constant(info.limb_coeffs[1])
+                        - u,
+                );
+            }
 
             constraints
                 .into_iter()
@@ -176,14 +192,14 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         d: &'b [Option<AssignedValue<N>>],
         rem: &'b AssignedInteger<W, N>,
     ) -> Result<(), Error> {
-        let region = self.plonk_region_context.region;
+        let region = self.plonk_region_context.borrow().region;
         let config = &self.int_mul_config;
         let info = self.info();
 
         region.assign_fixed(
             || "",
             config.sel,
-            self.plonk_region_context.offset,
+            self.plonk_region_context.borrow().offset,
             || Ok(N::one()),
         )?;
 
@@ -200,7 +216,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
                 let cell = region.assign_advice(
                     || "",
                     config.vars[col],
-                    self.plonk_region_context.offset + rot as usize,
+                    self.plonk_region_context.borrow().offset + rot as usize,
                     || Ok(from[i].as_ref().unwrap().value().unwrap()),
                 )?;
 
@@ -256,23 +272,37 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
                     ));
                 }
 
+                for i in info.limbs as usize..info.mul_check_limbs as usize {
+                    let u = limbs_sum[i].clone()
+                        + v_list_value[i - 1].0 * info.limb_coeffs[1]
+                        + v_list_value[i - 1].1 * info.limb_coeffs[0]
+                        + borrow;
+                    let u_bn = field_to_bn(&u);
+                    v_list_value.push((
+                        get_bn_compact_range_to_field(&u_bn, 2),
+                        get_bn_compact_range_to_field(&u_bn, 1),
+                    ));
+                }
+
                 v_list_value
             })
         })();
 
-        for i in 0..info.limbs as usize {
+        for i in 0..info.mul_check_limbs as usize {
             let v_h = self
                 .range_region_context
+                .borrow_mut()
                 .assign_common_range_cell(v_list_value.as_ref().map(|x| x[i].0))?;
             let v_l = self
                 .range_region_context
+                .borrow_mut()
                 .assign_compact_cell(v_list_value.as_ref().map(|x| x[i].1))?;
 
             let (col, rot) = config.v_list[i].0;
             let cell = region.assign_advice(
                 || "",
                 config.vars[col],
-                self.plonk_region_context.offset + rot as usize,
+                self.plonk_region_context.borrow().offset + rot as usize,
                 || Ok(v_h.value().unwrap()),
             )?;
             region.constrain_equal(cell.cell(), v_h.cell())?;
@@ -281,13 +311,13 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             let cell = region.assign_advice(
                 || "",
                 config.vars[col],
-                self.plonk_region_context.offset + rot as usize,
+                self.plonk_region_context.borrow().offset + rot as usize,
                 || Ok(v_l.value().unwrap()),
             )?;
             region.constrain_equal(cell.cell(), v_l.cell())?;
         }
 
-        self.plonk_region_context.offset += self.int_mul_config.block_rows;
+        self.plonk_region_context.borrow_mut().offset += self.int_mul_config.block_rows;
 
         Ok(())
     }

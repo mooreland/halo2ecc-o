@@ -120,6 +120,89 @@ impl<'b, C: CurveAffine> EccChipMSMOps<'b, C, C::Scalar> for NativeScalarEccCont
     }
 }
 
+impl<'b, C: CurveAffine, N: FieldExt> EccChipMSMOps<'b, C, N>
+    for GeneralScalarEccContext<'b, C, N>
+{
+    type AssignedScalar = AssignedInteger<C::Scalar, N>;
+
+    fn get_and_increase_msm_prefix(&mut self) -> u64 {
+        let msm_index = self.msm_index;
+        self.msm_index += 1;
+        msm_index * MSM_PREFIX_OFFSET
+    }
+
+    fn decompose_scalar<const WINDOW_SIZE: usize>(
+        &mut self,
+        s: &Self::AssignedScalar,
+    ) -> Result<Vec<[AssignedCondition<N>; WINDOW_SIZE]>, Error> {
+        let zero = N::zero();
+        let one = N::one();
+        let two = one + one;
+        let two_inv = two.invert().unwrap();
+
+        let s = self.scalar_integer_context.reduce(&s)?;
+        let mut bits = vec![];
+
+        for l in s.limbs_le {
+            let lv = l.unwrap();
+            let v = field_to_bn(&lv.value().unwrap());
+            let mut rest = lv;
+            for j in 0..self.scalar_integer_context.info.limb_bits {
+                let b = self
+                    .get_plonk_region_context()
+                    .assign_bit(v.bit(j).into())
+                    .unwrap();
+                let v = (rest.value().unwrap() - b.value().unwrap()) * two_inv;
+                rest = self
+                    .get_plonk_region_context()
+                    .one_line_with_last(
+                        vec![pair!(&rest, -one), pair!(&AssignedValue::from(b), one)].into_iter(),
+                        pair!(&v, two),
+                        None,
+                        ([], None),
+                    )?
+                    .1;
+                bits.push(b);
+            }
+
+            self.get_plonk_region_context()
+                .assert_equal_constant(&rest, zero)?
+        }
+
+        let padding = bits.len() % WINDOW_SIZE;
+        if padding != 0 {
+            let zero = self.get_plonk_region_context().assign_constant(zero)?;
+            for _ in padding..WINDOW_SIZE {
+                bits.push(AssignedCondition::from(zero));
+            }
+        }
+        assert!(bits.len() % WINDOW_SIZE == 0);
+
+        let mut res = bits
+            .chunks_exact(WINDOW_SIZE)
+            .map(|x| Vec::from(x).try_into().unwrap())
+            .collect::<Vec<_>>();
+
+        res.reverse();
+
+        Ok(res)
+    }
+
+    fn ecc_bisec_scalar(
+        &mut self,
+        cond: &AssignedCondition<N>,
+        a: &Self::AssignedScalar,
+        b: &Self::AssignedScalar,
+    ) -> Result<Self::AssignedScalar, Error> {
+        self.scalar_integer_context.bisec_int(cond, a, b)
+    }
+
+    fn ecc_assign_constant_zero_scalar(&mut self) -> Result<Self::AssignedScalar, Error> {
+        self.scalar_integer_context
+            .assign_int_constant(C::Scalar::zero())
+    }
+}
+
 pub trait EccChipMSMOps<'a, C: CurveAffine, N: FieldExt>:
     EccChipBaseOps<'a, C, N> + ParallelClone + Send + Sized
 {

@@ -1,3 +1,4 @@
+pub mod bls12_381;
 pub mod bn256;
 pub mod bn256_constants;
 pub mod fq;
@@ -147,6 +148,7 @@ pub trait PairingChipOps<'a, C: CurveAffine, N: FieldExt>:
         // not support identity
         self.get_integer_context()
             .plonk_region_context
+            .borrow_mut()
             .assert_false(&g2.z)?;
         let z = self.fq2_assign_one()?;
 

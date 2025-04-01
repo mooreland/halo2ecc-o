@@ -56,20 +56,25 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
             parts[i as usize] = Some(if i < decompose - 1 {
                 self.range_region_context
+                    .borrow_mut()
                     .assign_common_range_cell(curr_value)
             } else {
                 self.range_region_context
+                    .borrow_mut()
                     .assign_custom_range_cell(curr_value, get_n_from_i32((1 << leading_bits) - 1))
             }?);
         }
 
-        let res = self.plonk_region_context.sum_with_constant_in_one_line(
-            parts.iter().filter_map(|x| x.as_ref()).zip(
-                (0..decompose)
-                    .map(|i| (BigUint::one() << (i as u64 * COMMON_RANGE_BITS)).to_field()),
-            ),
-            None,
-        )?;
+        let res = self
+            .plonk_region_context
+            .borrow_mut()
+            .sum_with_constant_in_one_line(
+                parts.iter().filter_map(|x| x.as_ref()).zip(
+                    (0..decompose)
+                        .map(|i| (BigUint::one() << (i as u64 * COMMON_RANGE_BITS)).to_field()),
+                ),
+                None,
+            )?;
 
         Ok(res)
     }
@@ -106,6 +111,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             limbs[i as usize] = if i < self.info().limbs as u64 - 1 {
                 Some(
                     self.range_region_context
+                        .borrow_mut()
                         .assign_compact_cell(v.as_ref().map(|x| bn_to_field(x)))?,
                 )
             } else {
@@ -113,14 +119,17 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             };
         }
 
-        let native = self.plonk_region_context.sum_with_constant_in_one_line(
-            limbs
-                .iter()
-                .take(self.info().limbs as usize)
-                .map(|x| x.as_ref().unwrap() as _)
-                .zip(self.info.clone().limb_coeffs.iter().cloned()),
-            None,
-        )?;
+        let native = self
+            .plonk_region_context
+            .borrow_mut()
+            .sum_with_constant_in_one_line(
+                limbs
+                    .iter()
+                    .take(self.info().limbs as usize)
+                    .map(|x| x.as_ref().unwrap() as _)
+                    .zip(self.info.clone().limb_coeffs.iter().cloned()),
+                None,
+            )?;
 
         Ok(AssignedInteger::new(limbs.try_into().unwrap(), native, w))
     }
@@ -129,14 +138,17 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         &mut self,
         &limbs: &[Option<AssignedValue<N>>; MAX_LIMBS],
     ) -> Result<AssignedValue<N>, Error> {
-        let native = self.plonk_region_context.sum_with_constant_in_one_line(
-            limbs
-                .iter()
-                .take(self.info().limbs as usize)
-                .map(|x| x.as_ref().unwrap() as _)
-                .zip(self.info.clone().limb_coeffs.iter().cloned()),
-            None,
-        )?;
+        let native = self
+            .plonk_region_context
+            .borrow_mut()
+            .sum_with_constant_in_one_line(
+                limbs
+                    .iter()
+                    .take(self.info().limbs as usize)
+                    .map(|x| x.as_ref().unwrap() as _)
+                    .zip(self.info.clone().limb_coeffs.iter().cloned()),
+                None,
+            )?;
 
         Ok(native)
     }
@@ -157,6 +169,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             limbs[i as usize] = if i < self.info().limbs as u64 - 1 {
                 Some(
                     self.range_region_context
+                        .borrow_mut()
                         .assign_compact_cell(v.as_ref().map(|x| bn_to_field(x)))?,
                 )
             } else {
@@ -179,7 +192,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let info = self.info();
         let zero = N::zero();
         let one = N::one();
-        self.plonk_region_context.one_line(
+        self.plonk_region_context.borrow_mut().one_line(
             [
                 pair!(&a.native, zero),
                 pair!(&b.native, zero),
@@ -229,12 +242,16 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
         let mut limbs = [None; MAX_LIMBS];
         for (i, limb) in limbs_value.into_iter().enumerate() {
-            let cell = self.plonk_region_context.assign_constant(limb)?;
+            let cell = self
+                .plonk_region_context
+                .borrow_mut()
+                .assign_constant(limb)?;
             limbs[i] = Some(cell);
         }
 
         let native = self
             .plonk_region_context
+            .borrow_mut()
             .assign_constant(bn_to_field(&(&w % &self.info().n_modulus)))?;
 
         Ok(AssignedInteger::new(limbs, native, Some(w)))
@@ -246,9 +263,11 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         b: &AssignedInteger<W, N>,
     ) -> Result<(), Error> {
         self.plonk_region_context
+            .borrow_mut()
             .assert_equal(&a.native, &b.native)?;
         for i in 0..self.info().reduce_check_limbs as usize {
             self.plonk_region_context
+                .borrow_mut()
                 .assert_equal(&a.limbs_le[i].unwrap(), &b.limbs_le[i].unwrap())?;
         }
         Ok(())
@@ -288,11 +307,14 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let one = N::one();
 
         let d = (|| Some(bn_to_field(d.as_ref()?)))();
-        let assigned_d = self.range_region_context.assign_common_range_cell(d)?;
+        let assigned_d = self
+            .range_region_context
+            .borrow_mut()
+            .assign_common_range_cell(d)?;
         let d = d.map(|x| field_to_bn(&x));
 
         // Constrain on native.
-        self.plonk_region_context.one_line(
+        self.plonk_region_context.borrow_mut().one_line(
             [
                 pair!(&assigned_d, self.info().w_native),
                 pair!(&assigned_rem.native, one),
@@ -342,10 +364,11 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
             let v = self
                 .range_region_context
+                .borrow_mut()
                 .assign_common_range_cell(v.map(|v| bn_to_field(&v)))?;
 
             // constrains on limb_modulus
-            self.plonk_region_context.one_line(
+            self.plonk_region_context.borrow_mut().one_line(
                 [
                     pair!(&assigned_d, self.info().w_modulus_limbs_le[i]),
                     pair!(&assigned_rem.limbs_le[i].unwrap(), one),
@@ -384,11 +407,14 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let one = N::one();
 
         let d = (|| Some(bn_to_field(d.as_ref()?)))();
-        let assigned_d = self.range_region_context.assign_common_range_cell(d)?;
+        let assigned_d = self
+            .range_region_context
+            .borrow_mut()
+            .assign_common_range_cell(d)?;
         let d = d.map(|x| field_to_bn(&x));
 
         // Constrain on native.
-        self.plonk_region_context.one_line(
+        self.plonk_region_context.borrow_mut().one_line(
             [
                 pair!(&assigned_d, self.info().w_native),
                 pair!(&a.native, -one),
@@ -418,10 +444,11 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
             let v = self
                 .range_region_context
+                .borrow_mut()
                 .assign_common_range_cell(v.map(|v| bn_to_field(&v)))?;
 
             // constrains on limb_modulus
-            self.plonk_region_context.one_line(
+            self.plonk_region_context.borrow_mut().one_line(
                 [
                     pair!(&assigned_d, self.info().w_modulus_limbs_le[i]),
                     pair!(&a.limbs_le[i].unwrap(), -one),
@@ -467,6 +494,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         for i in 0..self.info().limbs as usize {
             let value = self
                 .plonk_region_context
+                .borrow_mut()
                 .add(&a.limbs_le[i].unwrap(), &b.limbs_le[i].unwrap())?;
             limbs[i] = Some(value)
         }
@@ -492,6 +520,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         for i in 0..self.info().limbs as usize {
             let value = self
                 .plonk_region_context
+                .borrow_mut()
                 .add_constant(&a.limbs_le[i].unwrap(), self.info().w_modulus_limbs_le[i])?;
             limbs[i] = Some(value)
         }
@@ -525,7 +554,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
         let mut limbs = [None; MAX_LIMBS];
         for i in 0..self.info().limbs as usize {
-            let cell = self.plonk_region_context.sum_with_constant(
+            let cell = self.plonk_region_context.borrow_mut().sum_with_constant(
                 &[
                     (&a.limbs_le[i].unwrap(), one),
                     (&b.limbs_le[i].unwrap(), -one),
@@ -567,6 +596,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         for i in 0..self.info().limbs as usize {
             let cell = self
                 .plonk_region_context
+                .borrow_mut()
                 .sum_with_constant(&[(&a.limbs_le[i].unwrap(), -one)], Some(upper_limbs[i]))?;
             limbs[i] = Some(cell);
         }
@@ -599,14 +629,17 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
     fn is_pure_zero(&mut self, a: &AssignedInteger<W, N>) -> Result<AssignedCondition<N>, Error> {
         let one = N::one();
 
-        let sum = self.plonk_region_context.sum_with_constant_in_one_line(
-            a.limbs_le
-                .iter()
-                .filter_map(|v| v.as_ref())
-                .map(|v| (v, one)),
-            None,
-        )?;
-        self.plonk_region_context.is_zero(&sum)
+        let sum = self
+            .plonk_region_context
+            .borrow_mut()
+            .sum_with_constant_in_one_line(
+                a.limbs_le
+                    .iter()
+                    .filter_map(|v| v.as_ref())
+                    .map(|v| (v, one)),
+                None,
+            )?;
+        self.plonk_region_context.borrow_mut().is_zero(&sum)
     }
 
     fn is_pure_w_modulus(
@@ -617,15 +650,23 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
         let native_diff = self
             .plonk_region_context
+            .borrow_mut()
             .add_constant(&a.native, -self.info().w_native)?;
-        let mut is_eq = self.plonk_region_context.is_zero(&native_diff)?;
+        let mut is_eq = self
+            .plonk_region_context
+            .borrow_mut()
+            .is_zero(&native_diff)?;
 
         for i in 0..self.info().pure_w_check_limbs as usize {
             let limb_diff = self
                 .plonk_region_context
+                .borrow_mut()
                 .add_constant(&a.limbs_le[i].unwrap(), -self.info().w_modulus_limbs_le[i])?;
-            let is_limb_eq = self.plonk_region_context.is_zero(&limb_diff)?;
-            is_eq = self.plonk_region_context.and(&is_eq, &is_limb_eq)?;
+            let is_limb_eq = self.plonk_region_context.borrow_mut().is_zero(&limb_diff)?;
+            is_eq = self
+                .plonk_region_context
+                .borrow_mut()
+                .and(&is_eq, &is_limb_eq)?;
         }
 
         Ok(is_eq)
@@ -639,7 +680,9 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let is_zero = self.is_pure_zero(&a)?;
         let is_w_modulus = self.is_pure_w_modulus(&a)?;
 
-        self.plonk_region_context.or(&is_zero, &is_w_modulus)
+        self.plonk_region_context
+            .borrow_mut()
+            .or(&is_zero, &is_w_modulus)
     }
 
     pub fn is_int_equal(
@@ -679,7 +722,10 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         // To avoid 0 / 0, we need to check b != 0
         // But to avoid reduce, we just need to check c != 0
         let is_b_zero = self.is_int_zero(&c)?;
-        let is_not_zero = self.plonk_region_context.try_assert_false(&is_b_zero)?;
+        let is_not_zero = self
+            .plonk_region_context
+            .borrow_mut()
+            .try_assert_false(&is_b_zero)?;
 
         if is_not_zero {
             Ok(assigned_res)
@@ -703,17 +749,21 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let a = self.reduce(a)?;
         let b = self.reduce(b)?;
         let is_b_zero = self.is_int_zero(&b)?;
-        let a_coeff = self.plonk_region_context.not(&is_b_zero)?;
+        let a_coeff = self.plonk_region_context.borrow_mut().not(&is_b_zero)?;
 
         let a = {
             let mut limbs_le = [None; MAX_LIMBS];
             for i in 0..self.info().limbs as usize {
                 let cell = self
                     .plonk_region_context
+                    .borrow_mut()
                     .mul(&a.limbs_le[i].unwrap(), a_coeff.as_ref())?;
                 limbs_le[i] = Some(cell);
             }
-            let native = self.plonk_region_context.mul(&a.native, a_coeff.as_ref())?;
+            let native = self
+                .plonk_region_context
+                .borrow_mut()
+                .mul(&a.native, a_coeff.as_ref())?;
             let value = (|| {
                 Some(if is_b_zero.value()?.is_zero_vartime() {
                     a.value?
@@ -787,6 +837,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         for i in 0..self.info().limbs as usize {
             let cell = self
                 .plonk_region_context
+                .borrow_mut()
                 .sum_with_constant(&[(&a.limbs_le[i].unwrap(), N::from(b as u64))], None)?;
             limbs[i] = Some(cell);
         }
@@ -811,7 +862,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
     ) -> Result<AssignedInteger<W, N>, Error> {
         let mut limbs = [None; MAX_LIMBS];
         for i in 0..self.info().limbs as usize {
-            let cell = self.plonk_region_context.bisec(
+            let cell = self.plonk_region_context.borrow_mut().bisec(
                 cond,
                 &a.limbs_le[i].unwrap(),
                 &b.limbs_le[i].unwrap(),
@@ -820,6 +871,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         }
         let native = self
             .plonk_region_context
+            .borrow_mut()
             .bisec(cond, &a.native, &b.native)?;
 
         Ok(AssignedInteger::new_with_times(
@@ -847,7 +899,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         let gid = gid * (self.info().limbs + 1);
 
         for i in 0..self.info().limbs as usize {
-            self.plonk_region_context.kvmap_set(
+            self.plonk_region_context.borrow_mut().kvmap_set(
                 gid + i as u64,
                 k,
                 v.limbs_le[i].as_ref().unwrap(),
@@ -855,6 +907,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
         }
 
         self.plonk_region_context
+            .borrow_mut()
             .kvmap_set(gid + self.info().limbs, k, &v.native)?;
 
         Ok(())
@@ -872,7 +925,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
 
         let mut limbs_le = [None; MAX_LIMBS];
         for i in 0..self.info().limbs as usize {
-            let v = self.plonk_region_context.kvmap_get(
+            let v = self.plonk_region_context.borrow_mut().kvmap_get(
                 gid + i as u64,
                 k,
                 candidate_v.limbs_le[i].unwrap().value(),
@@ -880,7 +933,7 @@ impl<'a, W: BaseExt, N: FieldExt> IntegerContext<'a, W, N> {
             limbs_le[i] = Some(v);
         }
 
-        let native = self.plonk_region_context.kvmap_get(
+        let native = self.plonk_region_context.borrow_mut().kvmap_get(
             gid + self.info().limbs,
             k,
             candidate_v.native.value(),
@@ -1162,17 +1215,26 @@ mod test {
 
             let res = context.int_div(&assigned_a, &assigned_b)?;
             context.assert_int_equal(&res.1, &assigned_c)?;
-            context.plonk_region_context.assert_false(&res.0)?;
+            context
+                .plonk_region_context
+                .borrow_mut()
+                .assert_false(&res.0)?;
 
             let assigned_zero = context.assign_w(Some(BigUint::from(0u64)))?;
             let res = context.int_div(&assigned_a, &assigned_zero)?;
-            context.plonk_region_context.assert_true(&res.0)?;
+            context
+                .plonk_region_context
+                .borrow_mut()
+                .assert_true(&res.0)?;
         } else {
             //TESTTODO: add more case
             let (_, assigned_a) = int_random_and_assign(context)?;
             let assigned_zero = context.assign_w(Some(BigUint::from(0u64)))?;
             let res = context.int_div(&assigned_a, &assigned_zero)?;
-            context.plonk_region_context.assert_false(&res.0)?;
+            context
+                .plonk_region_context
+                .borrow_mut()
+                .assert_false(&res.0)?;
         }
         Ok(())
     }
@@ -1185,8 +1247,14 @@ mod test {
             let (_, assigned_a) = int_random_and_assign(context)?;
             let (_, assigned_b) = int_random_and_assign(context)?;
 
-            let one = context.plonk_region_context.assign_bit(Fr::one())?;
-            let zero = context.plonk_region_context.assign_bit(Fr::zero())?;
+            let one = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign_bit(Fr::one())?;
+            let zero = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign_bit(Fr::zero())?;
 
             let res = context.bisec_int(&one, &assigned_a, &assigned_b)?;
             context.assert_int_equal(&assigned_a, &res)?;
@@ -1197,8 +1265,14 @@ mod test {
             let (_, assigned_a) = int_random_and_assign(context)?;
             let (_, assigned_b) = int_random_and_assign(context)?;
 
-            let one = context.plonk_region_context.assign_bit(Fr::one())?;
-            let zero = context.plonk_region_context.assign_bit(Fr::zero())?;
+            let one = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign_bit(Fr::one())?;
+            let zero = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign_bit(Fr::zero())?;
 
             let res = context.bisec_int(&one, &assigned_a, &assigned_b)?;
             context.assert_int_equal(&assigned_b, &res)?;
@@ -1217,8 +1291,14 @@ mod test {
             let (_, assigned_a) = int_random_and_assign(context)?;
             let (_, assigned_b) = int_random_and_assign(context)?;
 
-            let two = context.plonk_region_context.assign(Fr::one() + Fr::one())?;
-            let zero = context.plonk_region_context.assign(Fr::zero())?;
+            let two = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign(Fr::one() + Fr::one())?;
+            let zero = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign(Fr::zero())?;
 
             context.kvmap_set_int(1, &zero, &assigned_a)?;
             context.kvmap_set_int(1, &two, &assigned_b)?;
@@ -1232,8 +1312,14 @@ mod test {
             let (_, assigned_a) = int_random_and_assign(context)?;
             let (_, assigned_b) = int_random_and_assign(context)?;
 
-            let two = context.plonk_region_context.assign(Fr::one() + Fr::one())?;
-            let zero = context.plonk_region_context.assign(Fr::zero())?;
+            let two = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign(Fr::one() + Fr::one())?;
+            let zero = context
+                .plonk_region_context
+                .borrow_mut()
+                .assign(Fr::zero())?;
 
             context.kvmap_set_int(1, &zero, &assigned_a)?;
             context.kvmap_set_int(1, &two, &assigned_b)?;

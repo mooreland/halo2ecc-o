@@ -196,9 +196,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.get_integer_context()
-                .plonk_region_context
-                .assert_false(&p.z)?;
+            self.get_plonk_region_context().assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
         }
 
@@ -257,9 +255,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.get_integer_context()
-                .plonk_region_context
-                .assert_false(&p.z)?;
+            self.get_plonk_region_context().assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
         }
 
@@ -340,9 +336,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.get_integer_context()
-                .plonk_region_context
-                .assert_false(&p.z)?;
+            self.get_plonk_region_context().assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
         }
         let one = self.fq2_assign_one()?;
@@ -453,8 +447,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         *r = AssignedG2Affine::new(
             x3,
             y3,
-            self.get_integer_context()
-                .plonk_region_context
+            self.get_plonk_region_context()
                 .assign_constant(Fr::zero())?
                 .into(),
         );
@@ -497,6 +490,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
             y3,
             self.get_integer_context()
                 .plonk_region_context
+                .borrow_mut()
                 .assign_constant(Fr::zero())?
                 .into(),
         );
@@ -518,9 +512,7 @@ impl<'a> NativeScalarEccContext<'a, G1Affine> {
         let mut pairs = vec![];
         for &(p, q) in terms {
             // not support identity
-            self.get_integer_context()
-                .plonk_region_context
-                .assert_false(&p.z)?;
+            self.get_plonk_region_context().assert_false(&p.z)?;
             pairs.push((p, q.coeffs.iter()));
         }
 

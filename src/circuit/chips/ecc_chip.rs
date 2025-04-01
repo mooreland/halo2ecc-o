@@ -1,17 +1,19 @@
-use halo2_proofs::{
-    arithmetic::{Coordinates, CurveAffine, Field, FieldExt},
-    plonk::Error,
-};
-use num_bigint::BigUint;
-
 use crate::{
     assign::{
         AssignedCondition, AssignedCurvature, AssignedInteger, AssignedNonZeroPoint, AssignedPoint,
         AssignedValue,
     },
-    context::{IntegerContext, NativeScalarEccContext, PlonkRegionContext},
+    context::{
+        GeneralScalarEccContext, IntegerContext, NativeScalarEccContext, PlonkRegionContext,
+    },
     utils::{bn_to_field, field_to_bn},
 };
+use halo2_proofs::{
+    arithmetic::{Coordinates, CurveAffine, Field, FieldExt},
+    plonk::Error,
+};
+use num_bigint::BigUint;
+use std::cell::RefMut;
 
 use super::{bit_chip::BitChipOps as _, int_chip::IntUnsafeError, native_chip::NativeChipOps as _};
 
@@ -36,14 +38,28 @@ impl<'b, C: CurveAffine> EccChipBaseOps<'b, C, C::Scalar> for NativeScalarEccCon
         &mut self.integer_context
     }
 
-    fn plonk_region_context<'a>(&'a mut self) -> &'a mut PlonkRegionContext<'b, C::Scalar> {
+    fn plonk_region_context<'a>(&'a mut self) -> RefMut<PlonkRegionContext<'b, C::Scalar>> {
+        self.get_plonk_region_context()
+    }
+}
+
+impl<'b, C: CurveAffine, N: FieldExt> EccChipBaseOps<'b, C, N>
+    for GeneralScalarEccContext<'b, C, N>
+{
+    fn integer_context<'a>(
+        &'a mut self,
+    ) -> &'a mut IntegerContext<'b, <C as CurveAffine>::Base, N> {
+        &mut self.integer_context
+    }
+
+    fn plonk_region_context<'a>(&'a mut self) -> RefMut<PlonkRegionContext<'b, N>> {
         self.get_plonk_region_context()
     }
 }
 
 pub trait EccChipBaseOps<'b, C: CurveAffine, N: FieldExt> {
     fn integer_context<'a>(&'a mut self) -> &'a mut IntegerContext<'b, C::Base, N>;
-    fn plonk_region_context<'a>(&'a mut self) -> &'a mut PlonkRegionContext<'b, N>;
+    fn plonk_region_context<'a>(&'a mut self) -> RefMut<PlonkRegionContext<'b, N>>;
 
     fn assign_constant_point(&mut self, c: C) -> Result<AssignedPoint<C, N>, Error> {
         let coordinates: Option<Coordinates<_>> = c.coordinates().into();
